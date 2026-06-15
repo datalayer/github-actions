@@ -23,15 +23,16 @@ inputs:
     description: Optional path to a secondary evalset spec JSON file.
     required: false
     default: ""
-  token:
-    description: Datalayer API token.
+  api-key:
+    description: Datalayer API key.
     required: true
+    default: ""
   ai-agents-url:
     description: Optional AI Agents base URL override.
     required: false
     default: ""
-  account-uid:
-    description: Optional organization/account UID context.
+  billable-account-uid:
+    description: Optional billable account UID context used for eval operations and optional runtime creation.
     required: false
     default: ""
   run-limit:
@@ -82,10 +83,6 @@ inputs:
     description: Optional time reservation (minutes) for agent runtime creation.
     required: false
     default: "10"
-  billable-account-uid:
-    description: Optional billable account UID used when creating an agent runtime.
-    required: false
-    default: ""
 
 outputs:
   report-file:
@@ -159,9 +156,9 @@ runs:
         INPUT_EVALSET_SPEC_FILE: ${{ inputs.evalset-spec-file }}
         INPUT_SECONDARY_EVALSET_ID: ${{ inputs.secondary-evalset-id }}
         INPUT_SECONDARY_EVALSET_SPEC_FILE: ${{ inputs.secondary-evalset-spec-file }}
-        INPUT_TOKEN: ${{ inputs.token }}
+        INPUT_API_KEY: ${{ inputs.api-key }}
         INPUT_AI_AGENTS_URL: ${{ inputs.ai-agents-url }}
-        INPUT_ACCOUNT_UID: ${{ inputs.account-uid }}
+        INPUT_BILLABLE_ACCOUNT_UID: ${{ inputs.billable-account-uid }}
         INPUT_RUN_LIMIT: ${{ inputs.run-limit }}
         INPUT_OUTPUT_MARKDOWN: ${{ inputs.output-markdown }}
         INPUT_SECONDARY_OUTPUT_MARKDOWN: ${{ inputs.secondary-output-markdown }}
@@ -174,5 +171,4 @@ runs:
         INPUT_AGENT_ENVIRONMENT_NAME: ${{ inputs.agent-environment-name }}
         INPUT_AGENT_GIVEN_NAME: ${{ inputs.agent-given-name }}
         INPUT_AGENT_TIME_RESERVATION: ${{ inputs.agent-time-reservation }}
-        INPUT_BILLABLE_ACCOUNT_UID: ${{ inputs.billable-account-uid }}
       run: python ${{ github.action_path }}/src/datalayer_evals_action.py

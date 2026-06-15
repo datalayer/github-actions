@@ -56,7 +56,7 @@ def append_step_summary(text: str) -> None:
 
 def _make_client(
     *,
-    token: str,
+    api_key: str,
     ai_agents_url: str = "",
     iam_url: str = "",
     runtimes_url: str = "",
@@ -66,7 +66,7 @@ def _make_client(
         iam_url=iam_url or None,
         runtimes_url=runtimes_url or None,
     )
-    return DatalayerClient(urls=urls, token=token)
+    return DatalayerClient(urls=urls, token=api_key)
 
 
 def _create_agent_runtime(
@@ -352,9 +352,9 @@ def main() -> int:
     evalset_spec_file = os.getenv("INPUT_EVALSET_SPEC_FILE", "").strip()
     secondary_evalset_id = os.getenv("INPUT_SECONDARY_EVALSET_ID", "").strip()
     secondary_evalset_spec_file = os.getenv("INPUT_SECONDARY_EVALSET_SPEC_FILE", "").strip()
-    token = os.getenv("INPUT_TOKEN", "").strip()
+    api_key = os.getenv("INPUT_API_KEY", "").strip()
     ai_agents_url = os.getenv("INPUT_AI_AGENTS_URL", "").strip()
-    account_uid = os.getenv("INPUT_ACCOUNT_UID", "").strip()
+    account_uid = os.getenv("INPUT_BILLABLE_ACCOUNT_UID", "").strip()
     run_limit_raw = os.getenv("INPUT_RUN_LIMIT", "50").strip() or "50"
     output_markdown = os.getenv("INPUT_OUTPUT_MARKDOWN", "evals-report.md").strip() or "evals-report.md"
     secondary_output_markdown = os.getenv("INPUT_SECONDARY_OUTPUT_MARKDOWN", "").strip()
@@ -367,13 +367,10 @@ def main() -> int:
     agent_environment_name = os.getenv("INPUT_AGENT_ENVIRONMENT_NAME", "ai-agents-env").strip() or "ai-agents-env"
     agent_given_name = os.getenv("INPUT_AGENT_GIVEN_NAME", "").strip()
     agent_time_reservation = os.getenv("INPUT_AGENT_TIME_RESERVATION", "10").strip() or "10"
-    billable_account_uid = (
-        os.getenv("INPUT_BILLABLE_ACCOUNT_UID", "").strip()
-        or os.getenv("DATALAYER_BILLABLE_ACCOUNT_UID", "").strip()
-    )
+    billable_account_uid = os.getenv("INPUT_BILLABLE_ACCOUNT_UID", "").strip()
 
-    if not token:
-        print("Missing required input: token", file=sys.stderr)
+    if not api_key:
+        print("Missing required input: api-key", file=sys.stderr)
         return 2
 
     try:
@@ -382,7 +379,7 @@ def main() -> int:
         run_limit = 50
 
     client = _make_client(
-        token=token,
+        api_key=api_key,
         ai_agents_url=ai_agents_url,
         iam_url=iam_url,
         runtimes_url=runtimes_url,

@@ -2,7 +2,7 @@
 
 [![Become a Sponsor](https://img.shields.io/static/v1?label=Become%20a%20Sponsor&message=%E2%9D%A4&logo=GitHub&style=flat&color=1ABC9C)](https://github.com/sponsors/datalayer)
 
-# ☰ 👉 Datalayer GitHub Actions
+# ☰ 🎬 Datalayer GitHub Actions
 
 This repository contains reusable GitHub Actions for Datalayer workflows.
 
@@ -38,9 +38,9 @@ The action is implemented in Python and can be consumed from other repositories.
 - evalset-spec-file: optional, path to primary evalset spec JSON; action creates evalset and reports it
 - secondary-evalset-id: optional, secondary evalset UID
 - secondary-evalset-spec-file: optional, path to secondary evalset spec JSON
-- token: required, Datalayer API token
+- api-key: required, Datalayer API key
 - ai-agents-url: optional, override API URL
-- account-uid: optional, account/org context
+- billable-account-uid: optional, billable account UID context for eval operations and optional runtime creation
 - run-limit: optional, default 50
 - output-markdown: optional, default evals-report.md
 - secondary-output-markdown: optional, output file for secondary report
@@ -53,10 +53,6 @@ The action is implemented in Python and can be consumed from other repositories.
 - agent-environment-name: optional, default ai-agents-env
 - agent-given-name: optional runtime name for the created agent runtime
 - agent-time-reservation: optional runtime reservation in minutes, default 10
-- billable-account-uid: optional billable account UID used when creating the optional agent runtime
-
-If billable-account-uid is not provided, the action also checks the environment
-for DATALAYER_BILLABLE_ACCOUNT_UID (for example from a repository secret).
 
 When the action creates a runtime via agentspec-id or agentspec, it
 automatically tears the runtime down after report generation (including
@@ -90,7 +86,7 @@ Example workflow step (single evalset):
 uses: datalayer/github-actions@v1
 with:
 	evalset-id: 01KXXXXXXXXXXXX
-	token: ${{ secrets.DATALAYER_API_KEY }}
+	api-key: ${{ secrets.DATALAYER_API_KEY }}
 	run-limit: "50"
 	output-markdown: artifacts/evals-report.md
 	export-csv: "true"
@@ -100,7 +96,7 @@ Example workflow step with runtime bootstrap from spec id before report:
 uses: datalayer/github-actions@v1
 with:
 	evalset-id: 01KXXXXXXXXXXXX
-	token: ${{ secrets.DATALAYER_API_KEY }}
+	api-key: ${{ secrets.DATALAYER_API_KEY }}
 	agentspec-id: example-simple
 	agent-environment-name: ai-agents-env
 	agent-time-reservation: "10"
@@ -114,7 +110,7 @@ uses: datalayer/github-actions@v1
 with:
 	evalset-spec-file: .github/evals/no-codemode.evalset.json
 	secondary-evalset-spec-file: .github/evals/codemode.evalset.json
-	token: ${{ secrets.DATALAYER_API_KEY }}
+	api-key: ${{ secrets.DATALAYER_API_KEY }}
 	output-markdown: artifacts/no-codemode-report.md
 	secondary-output-markdown: artifacts/codemode-report.md
 	comparison-summary-output: artifacts/comparison-summary.md
