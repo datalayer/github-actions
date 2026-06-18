@@ -27,15 +27,30 @@ from datalayer_core.cli.commands.evals import (
     _write_report_csv,
 )
 from datalayer_core.client.client import DatalayerClient
-from datalayer_core.runtimes.agent_runtime import (
-    create_cloud_agent_runtime,
-    teardown_agent_execution_resources,
-)
+try:
+    from datalayer_core.agents import (
+        create_cloud_agent_runtime,
+        teardown_agent_execution_resources,
+    )
+except Exception:  # pragma: no cover - compatibility with older datalayer-core
+    from datalayer_core.runtimes.agent_runtime import (  # type: ignore
+        create_cloud_agent_runtime,
+        teardown_agent_execution_resources,
+    )
 from datalayer_core.utils.urls import DatalayerURLs
 
 
 def as_bool(raw: str) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def parse_csv(raw: str) -> list[str]:
+    values: list[str] = []
+    for token in (raw or "").split(","):
+        value = token.strip()
+        if value and value not in values:
+            values.append(value)
+    return values
 
 
 def append_github_output(key: str, value: str) -> None:
@@ -363,6 +378,7 @@ def main() -> int:
     iam_url = os.getenv("INPUT_IAM_URL", "").strip()
     runtimes_url = os.getenv("INPUT_RUNTIMES_URL", "").strip()
     agent_spec_id = os.getenv("INPUT_AGENT_SPEC_ID", "").strip()
+    agent_spec_ids_raw = os.getenv("INPUT_AGENT_SPEC_IDS", "").strip()
     agent_spec = os.getenv("INPUT_AGENT_SPEC", "").strip()
     agent_environment_name = os.getenv("INPUT_AGENT_ENVIRONMENT_NAME", "ai-agents-env").strip() or "ai-agents-env"
     agent_given_name = os.getenv("INPUT_AGENT_GIVEN_NAME", "").strip()
@@ -387,21 +403,72 @@ def main() -> int:
 
     created_agent_runtime_pod_name = ""
     created_agent_runtime_ingress = ""
+    created_agent_runtime_pod_names: list[str] = []
+    created_agent_runtime_ingresses: list[str] = []
     runtime_termination_attempted = False
+    agent_spec_ids = parse_csv(agent_spec_ids_raw)
 
     def _ensure_runtime_terminated() -> bool:
         nonlocal runtime_termination_attempted
-        if runtime_termination_attempted or not created_agent_runtime_pod_name:
+        if runtime_termination_attempted:
             return False
         runtime_termination_attempted = True
-        cleanup = teardown_agent_execution_resources(
-            client,
-            execution_target="cloud",
-            cloud_runtime_or_pod_name=created_agent_runtime_pod_name,
-        )
-        return bool(cleanup.get("cloud_runtime_terminated"))
+        terminated_any = False
+        runtime_ids = [
+            runtime_id
+            for runtime_id in created_agent_runtime_pod_names
+            if runtime_id
+        ]
+        if not runtime_ids and created_agent_runtime_pod_name:
+            runtime_ids = [created_agent_runtime_pod_name]
+        for runtime_id in runtime_ids:
+            cleanup = teardown_agent_execution_resources(
+                client,
+                execution_target="cloud",
+                cloud_runtime_or_pod_name=runtime_id,
+            )
+            terminated_any = bool(cleanup.get("cloud_runtime_terminated")) or terminated_any
+        return terminated_any
 
-    if any([agent_spec_id, agent_spec]):
+    if agent_spec_ids and any([agent_spec_id, agent_spec]):
+        print(
+            "agentspec-ids cannot be combined with agentspec-id or agentspec",
+            file=sys.stderr,
+        )
+        return 2
+
+    if agent_spec_ids:
+        try:
+            for idx, variant_id in enumerate(agent_spec_ids):
+                pod_name, ingress = _create_agent_runtime(
+                    client,
+                    environment_name=agent_environment_name,
+                    given_name=(
+                        f"{agent_given_name.strip()}-{idx + 1}"
+                        if agent_given_name.strip()
+                        else ""
+                    ),
+                    time_reservation=agent_time_reservation,
+                    agent_spec_id=variant_id,
+                    agent_spec="",
+                    billable_account_uid=billable_account_uid,
+                )
+                if pod_name:
+                    created_agent_runtime_pod_names.append(pod_name)
+                if ingress:
+                    created_agent_runtime_ingresses.append(ingress)
+            if created_agent_runtime_pod_names:
+                created_agent_runtime_pod_name = created_agent_runtime_pod_names[0]
+            if created_agent_runtime_ingresses:
+                created_agent_runtime_ingress = created_agent_runtime_ingresses[0]
+            if created_agent_runtime_pod_names:
+                atexit.register(_ensure_runtime_terminated)
+        except Exception as exc:
+            print(f"Failed to create runtimes for agentspec-ids: {exc}", file=sys.stderr)
+            append_step_summary("## Datalayer Evals Report\n\n")
+            append_step_summary(f"- Multi-runtime creation failed: `{exc}`\n\n")
+            return 1
+    elif any([agent_spec_id, agent_spec]):
         try:
             created_agent_runtime_pod_name, created_agent_runtime_ingress = _create_agent_runtime(
                 client,
@@ -412,6 +479,10 @@ def main() -> int:
                 agent_spec=agent_spec,
                 billable_account_uid=billable_account_uid,
             )
+            if created_agent_runtime_pod_name:
+                created_agent_runtime_pod_names = [created_agent_runtime_pod_name]
+            if created_agent_runtime_ingress:
+                created_agent_runtime_ingresses = [created_agent_runtime_ingress]
             if created_agent_runtime_pod_name:
                 atexit.register(_ensure_runtime_terminated)
         except Exception as exc:
@@ -521,6 +592,8 @@ def main() -> int:
     append_github_output("comparison_summary_file", comparison_summary_file)
     append_github_output("agent_runtime_pod_name", created_agent_runtime_pod_name)
     append_github_output("agent_runtime_ingress", created_agent_runtime_ingress)
+    append_github_output("agent_runtime_pod_names", json.dumps(created_agent_runtime_pod_names))
+    append_github_output("agent_runtime_ingresses", json.dumps(created_agent_runtime_ingresses))
     append_github_output("failed_run_count", str(total_failed))
     append_github_output("primary_failed_run_count", str(primary_failures["failed_run_count"]))
     append_github_output("secondary_failed_run_count", str(secondary_failures["failed_run_count"]))
@@ -544,22 +617,29 @@ def main() -> int:
                 append_step_summary(f"- Secondary CSV report: {secondary_outputs['csv_file']}\n")
             if comparison_summary_file:
                 append_step_summary(f"- Comparison summary: {comparison_summary_file}\n")
-        if created_agent_runtime_pod_name:
+        if created_agent_runtime_pod_names:
+            append_step_summary(
+                f"- Agent runtime pods: {', '.join(created_agent_runtime_pod_names)}\n"
+            )
+        elif created_agent_runtime_pod_name:
             append_step_summary(f"- Agent runtime pod: {created_agent_runtime_pod_name}\n")
-        if created_agent_runtime_ingress:
+        if created_agent_runtime_ingresses:
+            append_step_summary(
+                f"- Agent runtime ingresses: {', '.join(created_agent_runtime_ingresses)}\n"
+            )
+        elif created_agent_runtime_ingress:
             append_step_summary(f"- Agent runtime ingress: {created_agent_runtime_ingress}\n")
         append_step_summary(f"- Total failed runs: {total_failed}\n")
         append_step_summary("\n")
 
-        if created_agent_runtime_pod_name:
+        if created_agent_runtime_pod_names or created_agent_runtime_pod_name:
             if _ensure_runtime_terminated():
                 append_step_summary(
-                    f"- Agent runtime terminated: {created_agent_runtime_pod_name}\n"
+                    "- Agent runtime termination attempted for all created runtimes.\n"
                 )
             else:
                 append_step_summary(
-                    "- Warning: agent runtime termination was not confirmed "
-                    f"({created_agent_runtime_pod_name}).\n"
+                    "- Warning: agent runtime termination was not confirmed for one or more runtimes.\n"
                 )
 
         _append_failure_summary("Primary", primary_report)

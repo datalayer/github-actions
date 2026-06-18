@@ -67,6 +67,10 @@ inputs:
     description: Optional agent spec id to create an agent runtime before reporting.
     required: false
     default: ""
+  agentspec-ids:
+    description: Optional comma-separated agent spec ids to create multiple runtimes before reporting.
+    required: false
+    default: ""
   agentspec:
     description: Optional URL or local path to YAML/JSON agent spec used before reporting.
     required: false
@@ -83,6 +87,14 @@ inputs:
     description: Optional time reservation (minutes) for agent runtime creation.
     required: false
     default: "10"
+  upload-report-artifacts:
+    description: Upload generated markdown/csv/log artifacts in a final step.
+    required: false
+    default: "true"
+  report-artifact-name:
+    description: Name used by actions/upload-artifact for report artifacts.
+    required: false
+    default: datalayer-evals-reports
 
 outputs:
   report-file:
@@ -124,6 +136,12 @@ outputs:
   agent-runtime-ingress:
     description: Ingress URL of optional runtime created through datalayer agents create.
     value: ${{ steps.run.outputs.agent_runtime_ingress }}
+  agent-runtime-pod-names:
+    description: JSON array of pod names for runtimes created through agentspec-ids.
+    value: ${{ steps.run.outputs.agent_runtime_pod_names }}
+  agent-runtime-ingresses:
+    description: JSON array of ingress URLs for runtimes created through agentspec-ids.
+    value: ${{ steps.run.outputs.agent_runtime_ingresses }}
   failed-run-count:
     description: Total number of failed runs across primary and secondary reports.
     value: ${{ steps.run.outputs.failed_run_count }}
@@ -167,8 +185,28 @@ runs:
         INPUT_IAM_URL: ${{ inputs.iam-url }}
         INPUT_RUNTIMES_URL: ${{ inputs.runtimes-url }}
         INPUT_AGENT_SPEC_ID: ${{ inputs.agentspec-id }}
+        INPUT_AGENT_SPEC_IDS: ${{ inputs.agentspec-ids }}
         INPUT_AGENT_SPEC: ${{ inputs.agentspec }}
         INPUT_AGENT_ENVIRONMENT_NAME: ${{ inputs.agent-environment-name }}
         INPUT_AGENT_GIVEN_NAME: ${{ inputs.agent-given-name }}
         INPUT_AGENT_TIME_RESERVATION: ${{ inputs.agent-time-reservation }}
       run: python ${{ github.action_path }}/src/datalayer_evals_action.py
+
+    - name: Upload Datalayer report artifacts
+      if: ${{ inputs.upload-report-artifacts == 'true' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.report-artifact-name }}
+        if-no-files-found: warn
+        path: |
+          ${{ steps.run.outputs.report_file }}
+          ${{ steps.run.outputs.csv_file }}
+          ${{ steps.run.outputs.log_file }}
+          ${{ steps.run.outputs.timestamped_report_file }}
+          ${{ steps.run.outputs.timestamped_csv_file }}
+          ${{ steps.run.outputs.secondary_report_file }}
+          ${{ steps.run.outputs.secondary_csv_file }}
+          ${{ steps.run.outputs.secondary_log_file }}
+          ${{ steps.run.outputs.secondary_timestamped_report_file }}
+          ${{ steps.run.outputs.secondary_timestamped_csv_file }}
+          ${{ steps.run.outputs.comparison_summary_file }}

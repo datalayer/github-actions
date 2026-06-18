@@ -21,6 +21,11 @@ It supports two execution modes:
 - Primary report mode (single evalset).
 - Comparison mode (primary + secondary evalsets) with a generated summary markdown.
 
+It also supports optional multi-agentspec runtime bootstrap before reporting via:
+
+- `agentspec-id` (single)
+- `agentspec-ids` (comma-separated list)
+
 Evalsets can be provided as IDs, or created on the fly from spec files.
 
 Primary report mode produces, for each report:
@@ -32,6 +37,38 @@ Primary report mode produces, for each report:
 
 The action is implemented in Python and can be consumed from other repositories.
 
+### Secrets
+
+Authentication and billing context are supplied through repository secrets so
+they never appear in workflow files or logs:
+
+| Secret | Maps to input | Required | Purpose |
+| :-- | :-- | :-- | :-- |
+| `DATALAYER_API_KEY` | `api-key` | ✅ Required | Authenticates every call the action makes to Datalayer. |
+| `DATALAYER_BILLABLE_ACCOUNT_UID` | `billable-account-uid` | Optional | Billable account context used for eval operations and any optional runtime creation. |
+
+Reference them in the consumer workflow:
+
+```yaml
+with:
+  api-key: ${{ secrets.DATALAYER_API_KEY }}
+  billable-account-uid: ${{ secrets.DATALAYER_BILLABLE_ACCOUNT_UID }}
+```
+
+To make the billable account optional at dispatch time while still defaulting to
+the secret, use the `||` fallback:
+
+```yaml
+  billable-account-uid: ${{ inputs.billable_account_uid || secrets.DATALAYER_BILLABLE_ACCOUNT_UID }}
+```
+
+### Report Upload
+
+When `upload-report-artifacts` is `true` (the default), the action uploads the
+generated **markdown** and **CSV** reports (plus the structured `.log` JSON and
+any timestamped/secondary/comparison files) as a build artifact in a final step
+— no extra upload step is required in the consumer workflow.
+
 ### Inputs
 
 - evalset-id: required, target evalset UID
@@ -41,14 +78,20 @@ The action is implemented in Python and can be consumed from other repositories.
 - api-key: required, Datalayer API key
 - ai-agents-url: optional, override API URL
 - billable-account-uid: optional, billable account UID context for eval operations and optional runtime creation
+
+When `billable-account-uid` is omitted (or empty), the action does not force a
+billing override and calls run in the default account context for the API key.
 - run-limit: optional, default 50
 - output-markdown: optional, default evals-report.md
 - secondary-output-markdown: optional, output file for secondary report
 - comparison-summary-output: optional, output file for secondary-vs-primary summary
 - export-csv: optional, default true
+- upload-report-artifacts: optional, default true; uploads generated markdown/csv/log artifacts in a final step
+- report-artifact-name: optional, default datalayer-evals-reports
 - iam-url: optional, IAM URL override used when creating the optional agent runtime
 - runtimes-url: optional, Runtimes URL override used when creating the optional agent runtime
 - agentspec-id: optional, create an agent runtime before reporting using this spec id (default example-simple)
+- agentspec-ids: optional, comma-separated list of spec ids for multi-runtime bootstrap before reporting
 - agentspec: optional, URL or local file path to YAML/JSON agent spec; mutually exclusive with agentspec-id
 - agent-environment-name: optional, default ai-agents-env
 - agent-given-name: optional runtime name for the created agent runtime
@@ -75,6 +118,8 @@ At least one of evalset-id or evalset-spec-file must be provided.
 - comparison-summary-file: generated comparison summary markdown
 - agent-runtime-pod-name: pod name of runtime optionally created through the core client
 - agent-runtime-ingress: ingress URL of that optional runtime
+- agent-runtime-pod-names: JSON array of pod names created through agentspec-ids
+- agent-runtime-ingresses: JSON array of ingress URLs created through agentspec-ids
 - failed-run-count: total number of failed runs across primary and secondary reports
 - primary-failed-run-count: number of failed runs in the primary report
 - secondary-failed-run-count: number of failed runs in the secondary report
@@ -103,6 +148,28 @@ with:
 	billable-account-uid: ${{ secrets.DATALAYER_BILLABLE_ACCOUNT_UID }}
 	output-markdown: artifacts/evals-report.md
 	export-csv: "true"
+
+Example workflow step with multi-agentspec bootstrap:
+
+uses: datalayer/github-actions@v1
+with:
+	evalset-id: 01KXXXXXXXXXXXX
+	api-key: ${{ secrets.DATALAYER_API_KEY }}
+	agentspec-ids: example-evals,example-evals-nocodemode
+	agent-environment-name: ai-agents-env
+	agent-time-reservation: "10"
+	output-markdown: artifacts/evals-report.md
+	export-csv: "true"
+
+The action now includes a final upload step by default (`upload-report-artifacts=true`) that publishes markdown/csv/log artifacts.
+
+To disable built-in upload and manage upload yourself:
+
+uses: datalayer/github-actions@v1
+with:
+	evalset-id: 01KXXXXXXXXXXXX
+	api-key: ${{ secrets.DATALAYER_API_KEY }}
+	upload-report-artifacts: "false"
 
 Example workflow step (two spec files, one comparison run):
 
