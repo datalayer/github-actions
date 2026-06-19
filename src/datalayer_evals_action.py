@@ -23,7 +23,6 @@ from datalayer_core.evals import (
     average_latest_pass_rate,
     build_eval_report,
     collect_report_failures,
-    evaluate_evalset,
     load_evalset_spec,
     make_client,
     now_iso,
@@ -117,14 +116,11 @@ def _resolve_evalset_id(
     explicit_evalset_id: str,
     spec_file: str,
     account_uid: str,
-) -> tuple[str, dict[str, Any] | None, bool]:
-    """Resolve evalset id.
-
-    Returns ``(evalset_id, evalset_spec_or_none, created_from_spec)``.
-    """
+) -> str:
+    """Return an evalset id, creating it from a spec file when needed."""
     evalset_id = explicit_evalset_id.strip()
     if evalset_id:
-        return evalset_id, None, False
+        return evalset_id
 
     spec_path = spec_file.strip()
     if not spec_path:
@@ -140,107 +136,7 @@ def _resolve_evalset_id(
     created_id = str(((payload.get("evalset") or {}).get("id") or "")).strip()
     if not created_id:
         raise ValueError(f"Evalset create response did not contain an id: {payload}")
-    return created_id, spec, True
-
-
-def _build_expected_outputs(evalset_spec: dict[str, Any]) -> list[dict[str, Any]]:
-    outputs: list[dict[str, Any]] = []
-    cases = [case for case in (evalset_spec.get("cases") or []) if isinstance(case, dict)]
-    for case in cases:
-        expected = case.get("expected_output")
-        if isinstance(expected, dict):
-            text = expected.get("text")
-            if isinstance(text, str):
-                outputs.append({"text": text})
-            else:
-                outputs.append({"text": json.dumps(expected, sort_keys=True)})
-        elif isinstance(expected, str):
-            outputs.append({"text": expected})
-        elif expected is None:
-            outputs.append({"text": ""})
-        else:
-            outputs.append({"text": str(expected)})
-    return outputs
-
-
-def _seed_evalset_runs_if_missing(
-    client: DatalayerClient,
-    *,
-    evalset_id: str,
-    evalset_spec: dict[str, Any] | None,
-    account_uid: str,
-    agent_spec_ids: list[str],
-    run_environment: str,
-) -> bool:
-    """Create minimal experiments/runs when a fresh spec-created evalset has none.
-
-    Returns ``True`` when synthetic runs were created.
-    """
-    if not evalset_spec:
-        return False
-
-    experiments_payload = client.evals_list_experiments(
-        evalset_id=evalset_id,
-        limit=200,
-        offset=0,
-        account_uid=account_uid or None,
-    )
-    existing_experiments = [
-        row for row in (experiments_payload.get("experiments") or []) if isinstance(row, dict)
-    ]
-    for experiment in existing_experiments:
-        experiment_id = str(experiment.get("id") or "").strip()
-        if not experiment_id:
-            continue
-        runs_payload = client.evals_list_runs(
-            experiment_id,
-            limit=1,
-            offset=0,
-            account_uid=account_uid or None,
-        )
-        if int(runs_payload.get("total") or 0) > 0:
-            return False
-
-    variants = agent_spec_ids or ["default"]
-    metrics = evaluate_evalset(evalset_spec, _build_expected_outputs(evalset_spec))
-    stamp = timestamp_slug(now_iso())
-    for index, variant in enumerate(variants, start=1):
-        experiment_name = f"gha-{variant}-{stamp}-{index}"
-        experiment_payload = client.evals_create_experiment(
-            name=experiment_name,
-            evalset_id=evalset_id,
-            description="Experiment created by datalayer/github-actions for CI eval execution.",
-            status="draft",
-            config={
-                "launch_source": "github-actions",
-                "run_mode": str(evalset_spec.get("kind") or "batch"),
-                "run_environment": run_environment,
-                "agent_spec_id": variant,
-            },
-            summary={"launch_source": "github-actions"},
-            account_uid=account_uid or None,
-        )
-        experiment_id = str(((experiment_payload.get("experiment") or {}).get("id") or "")).strip()
-        if not experiment_id:
-            raise ValueError(f"Experiment create response did not contain an id: {experiment_payload}")
-        run_payload = client.evals_create_run(
-            experiment_id,
-            status="completed",
-            metrics=metrics,
-            summary={
-                "launch_source": "github-actions",
-                "synthetic": True,
-                "agent_spec_id": variant,
-            },
-            report={
-                "note": "Synthetic run created by datalayer/github-actions to ensure report completeness.",
-            },
-            account_uid=account_uid or None,
-        )
-        run_id = str(((run_payload.get("run") or {}).get("id") or "")).strip()
-        if not run_id:
-            raise ValueError(f"Run create response did not contain an id: {run_payload}")
-    return True
+    return created_id
 
 
 def _report_is_partial(report: dict[str, Any]) -> bool:
@@ -387,7 +283,6 @@ def main() -> int:
     api_key = os.getenv("INPUT_API_KEY", "").strip()
     ai_agents_url = os.getenv("INPUT_AI_AGENTS_URL", "").strip()
     account_uid = os.getenv("INPUT_BILLABLE_ACCOUNT_UID", "").strip()
-    run_environment = os.getenv("INPUT_RUN_ENVIRONMENT", "sdk").strip() or "sdk"
     run_limit_raw = os.getenv("INPUT_RUN_LIMIT", "50").strip() or "50"
     output_markdown = os.getenv("INPUT_OUTPUT_MARKDOWN", "evals-report.md").strip() or "evals-report.md"
     secondary_output_markdown = os.getenv("INPUT_SECONDARY_OUTPUT_MARKDOWN", "").strip()
@@ -510,7 +405,7 @@ def main() -> int:
             return 1
 
     try:
-        resolved_evalset_id, resolved_evalset_spec, created_primary_from_spec = _resolve_evalset_id(
+        resolved_evalset_id = _resolve_evalset_id(
             client,
             explicit_evalset_id=evalset_id,
             spec_file=evalset_spec_file,
@@ -521,15 +416,9 @@ def main() -> int:
         return 2
 
     resolved_secondary_evalset_id = ""
-    resolved_secondary_evalset_spec: dict[str, Any] | None = None
-    created_secondary_from_spec = False
     if secondary_evalset_id or secondary_evalset_spec_file:
         try:
-            (
-                resolved_secondary_evalset_id,
-                resolved_secondary_evalset_spec,
-                created_secondary_from_spec,
-            ) = _resolve_evalset_id(
+            resolved_secondary_evalset_id = _resolve_evalset_id(
                 client,
                 explicit_evalset_id=secondary_evalset_id,
                 spec_file=secondary_evalset_spec_file,
@@ -540,15 +429,6 @@ def main() -> int:
             return 2
 
     try:
-        if created_primary_from_spec:
-            _seed_evalset_runs_if_missing(
-                client,
-                evalset_id=resolved_evalset_id,
-                evalset_spec=resolved_evalset_spec,
-                account_uid=account_uid,
-                agent_spec_ids=agent_spec_ids,
-                run_environment=run_environment,
-            )
         primary_report, primary_outputs = _generate_report(
             client,
             evalset_id=resolved_evalset_id,
@@ -578,15 +458,6 @@ def main() -> int:
                 primary_path.with_name(primary_path.stem + "-secondary" + primary_path.suffix)
             )
         try:
-            if created_secondary_from_spec:
-                _seed_evalset_runs_if_missing(
-                    client,
-                    evalset_id=resolved_secondary_evalset_id,
-                    evalset_spec=resolved_secondary_evalset_spec,
-                    account_uid=account_uid,
-                    agent_spec_ids=agent_spec_ids,
-                    run_environment=run_environment,
-                )
             secondary_report, secondary_outputs = _generate_report(
                 client,
                 evalset_id=resolved_secondary_evalset_id,

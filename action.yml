@@ -36,7 +36,7 @@ inputs:
     required: false
     default: ""
   run-environment:
-    description: Optional run environment label recorded on synthetic fallback runs.
+    description: Optional run environment label passed through to the action runtime.
     required: false
     default: "sdk"
   run-limit:
