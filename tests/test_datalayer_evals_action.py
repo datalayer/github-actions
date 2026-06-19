@@ -31,6 +31,12 @@ def action_module(monkeypatch):
         "type_counts": {},
         "failures": [],
     }
+    evals_pkg.execute_evalset_spec = lambda *_args, **_kwargs: {
+        "evalset_id": "evalset-executed",
+        "evalset_name": "spec-sdk",
+        "experiment_ids": [],
+        "run_ids": [],
+    }
     evals_pkg.load_evalset_spec = lambda *_args, **_kwargs: {"name": "spec", "cases": []}
     evals_pkg.make_client = lambda *_args, **_kwargs: _StubClient()
     evals_pkg.now_iso = lambda: "2026-01-01T00:00:00Z"

@@ -23,6 +23,7 @@ from datalayer_core.evals import (
     average_latest_pass_rate,
     build_eval_report,
     collect_report_failures,
+    execute_evalset_spec,
     load_evalset_spec,
     make_client,
     now_iso,
@@ -314,6 +315,8 @@ def main() -> int:
     agent_given_name = os.getenv("INPUT_AGENT_GIVEN_NAME", "").strip()
     agent_time_reservation = os.getenv("INPUT_AGENT_TIME_RESERVATION", "10").strip() or "10"
     billable_account_uid = os.getenv("INPUT_BILLABLE_ACCOUNT_UID", "").strip()
+    execute_runs = as_bool(os.getenv("INPUT_EXECUTE_RUNS", "false"))
+    run_environment = os.getenv("INPUT_RUN_ENVIRONMENT", "sdk").strip() or "sdk"
 
     if not api_key:
         print("Missing required input: api-key", file=sys.stderr)
@@ -323,6 +326,11 @@ def main() -> int:
         run_limit = max(2, min(200, int(run_limit_raw)))
     except ValueError:
         run_limit = 50
+
+    try:
+        execution_run_limit = max(1, int(run_limit_raw))
+    except ValueError:
+        execution_run_limit = 1
 
     client = make_client(
         api_key=api_key,
@@ -367,7 +375,39 @@ def main() -> int:
         )
         return 2
 
-    if agent_spec_ids:
+    executed_evalset_id = ""
+    if execute_runs:
+        if not evalset_spec_file:
+            print("execute-runs requires evalset-spec-file", file=sys.stderr)
+            return 2
+        if not agent_spec_ids:
+            print("execute-runs requires agentspec-ids", file=sys.stderr)
+            return 2
+        try:
+            spec = load_evalset_spec(evalset_spec_file)
+            execution = execute_evalset_spec(
+                client,
+                spec=spec,
+                agentspec_ids=agent_spec_ids,
+                run_limit=execution_run_limit,
+                run_environment=run_environment,
+                environment_name=agent_environment_name,
+                account_uid=account_uid or None,
+                launch_source="datalayer-github-actions",
+                log=print,
+            )
+            executed_evalset_id = str(execution.get("evalset_id") or "")
+            if not executed_evalset_id:
+                raise RuntimeError("Runner did not return an evalset id.")
+            evalset_id = executed_evalset_id
+        except Exception as exc:
+            message = f"Failed to execute eval runs: {exc}"
+            print(message, file=sys.stderr)
+            append_step_summary("## Datalayer Evals Report\n\n")
+            append_step_summary(f"- Error: `{message}`\n\n")
+            return 1
+
+    if agent_spec_ids and not execute_runs:
         try:
             for idx, variant_id in enumerate(agent_spec_ids):
                 pod_name, ingress = _create_agent_runtime(
@@ -532,6 +572,8 @@ def main() -> int:
     append_github_output("secondary_timestamped_report_file", secondary_outputs["timestamped_report_file"])
     append_github_output("secondary_timestamped_csv_file", secondary_outputs["timestamped_csv_file"])
     append_github_output("comparison_summary_file", comparison_summary_file)
+    append_github_output("evalset_id", resolved_evalset_id)
+    append_github_output("executed_evalset_id", executed_evalset_id)
     append_github_output("agent_runtime_pod_name", created_agent_runtime_pod_name)
     append_github_output("agent_runtime_ingress", created_agent_runtime_ingress)
     append_github_output("agent_runtime_pod_names", json.dumps(created_agent_runtime_pod_names))
@@ -543,6 +585,8 @@ def main() -> int:
     if primary_outputs["report_file"]:
         append_step_summary("## Datalayer Evals Report\n\n")
         append_step_summary(f"- Primary evalset: {resolved_evalset_id}\n")
+        if executed_evalset_id:
+            append_step_summary(f"- Executed evalset (real runs): {executed_evalset_id}\n")
         append_step_summary(f"- Primary markdown report: {primary_outputs['report_file']}\n")
         if primary_outputs["csv_file"]:
             append_step_summary(f"- Primary CSV report: {primary_outputs['csv_file']}\n")
