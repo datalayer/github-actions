@@ -19,12 +19,16 @@ from pathlib import Path
 from typing import Any
 
 from datalayer_core.cli.commands.agents import _load_agent_spec
-from datalayer_core.cli.commands.evals import (
-    _now_iso,
-    _report_data,
-    _report_markdown,
-    _timestamp_slug,
-    _write_report_csv,
+from datalayer_core.evals import (
+    average_latest_pass_rate,
+    build_eval_report,
+    collect_report_failures,
+    load_evalset_spec,
+    make_client,
+    now_iso,
+    render_eval_report_markdown,
+    timestamp_slug,
+    write_eval_report_csv,
 )
 from datalayer_core.client.client import DatalayerClient
 try:
@@ -37,7 +41,6 @@ except Exception:  # pragma: no cover - compatibility with older datalayer-core
         create_cloud_agent_runtime,
         teardown_agent_execution_resources,
     )
-from datalayer_core.utils.urls import DatalayerURLs
 
 
 def as_bool(raw: str) -> bool:
@@ -67,21 +70,6 @@ def append_step_summary(text: str) -> None:
         return
     with open(summary_path, "a", encoding="utf-8") as stream:
         stream.write(text)
-
-
-def _make_client(
-    *,
-    api_key: str,
-    ai_agents_url: str = "",
-    iam_url: str = "",
-    runtimes_url: str = "",
-) -> DatalayerClient:
-    urls = DatalayerURLs.from_environment(
-        ai_agents_url=ai_agents_url or None,
-        iam_url=iam_url or None,
-        runtimes_url=runtimes_url or None,
-    )
-    return DatalayerClient(urls=urls, token=api_key)
 
 
 def _create_agent_runtime(
@@ -138,106 +126,15 @@ def _resolve_evalset_id(
     if not spec_path:
         raise ValueError("Provide evalset-id or evalset-spec-file.")
 
-    spec = json.loads(Path(spec_path).read_text(encoding="utf-8"))
-    if not isinstance(spec, dict):
-        raise ValueError(f"Evalset spec file must contain a JSON object: {spec_path}")
-
-    name = str(spec.get("name") or "").strip()
-    if not name:
-        raise ValueError(f"Evalset spec file is missing 'name': {spec_path}")
-
-    cases = [case for case in (spec.get("cases") or []) if isinstance(case, dict)]
-    tags = [str(tag) for tag in (spec.get("tags") or []) if str(tag).strip()]
-
-    payload = client.evals_create_eval(
-        name=name,
-        description=str(spec.get("description") or ""),
-        run_environment=str(spec.get("run_environment") or "sdk"),
-        kind=str(spec.get("kind") or "batch"),
-        schema=spec.get("schema") if isinstance(spec.get("schema"), dict) else {},
-        metadata=spec.get("metadata") if isinstance(spec.get("metadata"), dict) else {},
-        tags=tags,
-        cases=cases,
+    spec = load_evalset_spec(spec_path)
+    payload = client.evals_create_eval_from_spec(
+        spec=spec,
         account_uid=account_uid or None,
     )
     created_id = str(((payload.get("evalset") or {}).get("id") or "")).strip()
     if not created_id:
         raise ValueError(f"Evalset create response did not contain an id: {payload}")
     return created_id
-
-
-def _iter_runs(report: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
-    """Return (experiment_name, run) tuples for every run in the report."""
-    pairs: list[tuple[str, dict[str, Any]]] = []
-    for experiment in report.get("experiments") or []:
-        if not isinstance(experiment, dict):
-            continue
-        experiment_name = str(experiment.get("name") or experiment.get("id") or "")
-        for run in experiment.get("runs") or []:
-            if isinstance(run, dict):
-                pairs.append((experiment_name, run))
-    return pairs
-
-
-def _collect_failures(report: dict[str, Any]) -> dict[str, Any]:
-    """Aggregate failure information across all runs in the report.
-
-    Returns a dict with the failed-run count, a breakdown by failure type, and a
-    list of structured failure records (experiment, run id, stage, type, message,
-    detail excerpt) so the step summary can surface as much detail as possible.
-    """
-    failures: list[dict[str, Any]] = []
-    type_counts: dict[str, int] = {}
-    failed_status_runs = 0
-
-    for experiment_name, run in _iter_runs(report):
-        status = str(run.get("status") or "").strip().lower()
-        cause = run.get("failure_cause") if isinstance(run.get("failure_cause"), dict) else None
-        is_failed = status in {"failed", "error"} or bool(cause)
-        if not is_failed:
-            continue
-        if status in {"failed", "error"}:
-            failed_status_runs += 1
-
-        failure_type = str((cause or {}).get("type") or "unknown")
-        type_counts[failure_type] = type_counts.get(failure_type, 0) + 1
-
-        detail = str((cause or {}).get("detail_excerpt") or "").strip()
-        detail_single = " ".join(detail.split())
-        if len(detail_single) > 300:
-            detail_single = detail_single[:297] + "..."
-
-        failures.append(
-            {
-                "experiment": experiment_name,
-                "run_id": str(run.get("id") or ""),
-                "status": status or "unknown",
-                "stage": str((cause or {}).get("stage") or "-"),
-                "type": failure_type,
-                "message": str((cause or {}).get("message") or "-"),
-                "detail_excerpt": detail_single or "-",
-                "execution_url": str((cause or {}).get("execution_url") or ""),
-            }
-        )
-
-    return {
-        "failed_run_count": len(failures),
-        "failed_status_runs": failed_status_runs,
-        "type_counts": type_counts,
-        "failures": failures,
-    }
-
-
-def _avg_latest_pass_rate(report: dict[str, Any]) -> float | None:
-    values = [
-        float(experiment.get("latest_pass_rate"))
-        for experiment in (report.get("experiments") or [])
-        if isinstance(experiment, dict)
-        and isinstance(experiment.get("latest_pass_rate"), (int, float))
-    ]
-    if not values:
-        return None
-    return sum(values) / len(values)
 
 
 def _generate_report(
@@ -250,9 +147,9 @@ def _generate_report(
     export_csv: bool,
 ) -> tuple[dict[str, Any], dict[str, str]]:
     """Build and persist a report using the core eval-report helpers."""
-    report = _report_data(
-        client=client,
-        evalset_id=evalset_id,
+    report = build_eval_report(
+        client,
+        evalset_id,
         run_limit=run_limit,
         account_uid=account_uid or None,
     )
@@ -260,7 +157,7 @@ def _generate_report(
     report_path = Path(output_markdown)
     report_path.parent.mkdir(parents=True, exist_ok=True)
 
-    markdown = _report_markdown(report, run_limit=run_limit, colorize=False)
+    markdown = render_eval_report_markdown(report, run_limit=run_limit, colorize=False)
     report_path.write_text(markdown + "\n", encoding="utf-8")
 
     # A log artifact carrying the full structured report (including every
@@ -271,14 +168,14 @@ def _generate_report(
     csv_out = ""
     if export_csv:
         csv_path = report_path.with_name(report_path.stem + ".csv")
-        _write_report_csv(report, csv_path)
+        write_eval_report_csv(report, csv_path)
         csv_out = str(csv_path)
 
-    timestamp = _timestamp_slug(str(report.get("generated_at", _now_iso())))
+    timestamp = timestamp_slug(str(report.get("generated_at", now_iso())))
     timestamped_md = Path(f"report-{timestamp}.md")
     timestamped_md.write_text(markdown + "\n", encoding="utf-8")
     timestamped_csv = Path(f"report-{timestamp}.csv")
-    _write_report_csv(report, timestamped_csv)
+    write_eval_report_csv(report, timestamped_csv)
 
     outputs = {
         "report_file": str(report_path),
@@ -298,10 +195,10 @@ def _write_comparison_summary(
     primary_report: dict[str, Any],
     secondary_report: dict[str, Any],
 ) -> None:
-    primary_avg = _avg_latest_pass_rate(primary_report)
-    secondary_avg = _avg_latest_pass_rate(secondary_report)
-    primary_failures = _collect_failures(primary_report)
-    secondary_failures = _collect_failures(secondary_report)
+    primary_avg = average_latest_pass_rate(primary_report)
+    secondary_avg = average_latest_pass_rate(secondary_report)
+    primary_failures = collect_report_failures(primary_report)
+    secondary_failures = collect_report_failures(secondary_report)
 
     lines: list[str] = []
     lines.append("# Evals Comparison Summary")
@@ -333,7 +230,7 @@ def _write_comparison_summary(
 
 def _append_failure_summary(label: str, report: dict[str, Any]) -> int:
     """Render an aggregated failure section into the step summary. Returns count."""
-    aggregate = _collect_failures(report)
+    aggregate = collect_report_failures(report)
     failed = int(aggregate["failed_run_count"])
     append_step_summary(f"### {label} failures\n\n")
     if failed == 0:
@@ -394,7 +291,7 @@ def main() -> int:
     except ValueError:
         run_limit = 50
 
-    client = _make_client(
+    client = make_client(
         api_key=api_key,
         ai_agents_url=ai_agents_url,
         iam_url=iam_url,
@@ -571,9 +468,9 @@ def main() -> int:
         )
         comparison_summary_file = str(summary_path)
 
-    primary_failures = _collect_failures(primary_report)
+    primary_failures = collect_report_failures(primary_report)
     secondary_failures = (
-        _collect_failures(secondary_report)
+        collect_report_failures(secondary_report)
         if resolved_secondary_evalset_id
         else {"failed_run_count": 0}
     )

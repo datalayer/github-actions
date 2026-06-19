@@ -19,12 +19,24 @@ def action_module(monkeypatch):
     agents_cmd_mod = types.ModuleType("datalayer_core.cli.commands.agents")
     agents_cmd_mod._load_agent_spec = lambda _: {"name": "spec"}
 
-    evals_cmd_mod = types.ModuleType("datalayer_core.cli.commands.evals")
-    evals_cmd_mod._now_iso = lambda: "2026-01-01T00:00:00Z"
-    evals_cmd_mod._report_data = lambda **_: {"generated_at": "2026-01-01T00:00:00Z", "experiments": []}
-    evals_cmd_mod._report_markdown = lambda *_args, **_kwargs: "# report"
-    evals_cmd_mod._timestamp_slug = lambda _value: "20260101T000000Z"
-    evals_cmd_mod._write_report_csv = lambda *_args, **_kwargs: None
+    evals_pkg = types.ModuleType("datalayer_core.evals")
+    evals_pkg.build_eval_report = lambda *_args, **_kwargs: {
+        "generated_at": "2026-01-01T00:00:00Z",
+        "experiments": [],
+    }
+    evals_pkg.average_latest_pass_rate = lambda *_args, **_kwargs: None
+    evals_pkg.collect_report_failures = lambda *_args, **_kwargs: {
+        "failed_run_count": 0,
+        "failed_status_runs": 0,
+        "type_counts": {},
+        "failures": [],
+    }
+    evals_pkg.load_evalset_spec = lambda *_args, **_kwargs: {"name": "spec", "cases": []}
+    evals_pkg.make_client = lambda *_args, **_kwargs: _StubClient()
+    evals_pkg.now_iso = lambda: "2026-01-01T00:00:00Z"
+    evals_pkg.render_eval_report_markdown = lambda *_args, **_kwargs: "# report"
+    evals_pkg.timestamp_slug = lambda _value: "20260101T000000Z"
+    evals_pkg.write_eval_report_csv = lambda *_args, **_kwargs: None
 
     client_pkg = types.ModuleType("datalayer_core.client")
     client_mod = types.ModuleType("datalayer_core.client.client")
@@ -66,7 +78,7 @@ def action_module(monkeypatch):
         "datalayer_core.cli": cli_mod,
         "datalayer_core.cli.commands": commands_mod,
         "datalayer_core.cli.commands.agents": agents_cmd_mod,
-        "datalayer_core.cli.commands.evals": evals_cmd_mod,
+        "datalayer_core.evals": evals_pkg,
         "datalayer_core.client": client_pkg,
         "datalayer_core.client.client": client_mod,
         "datalayer_core.agents": agents_mod,
@@ -145,7 +157,7 @@ def test_resolve_evalset_id_from_spec_uses_optional_account_uid(action_module, t
     captured = {}
 
     class FakeClient:
-        def evals_create_eval(self, **kwargs):
+        def evals_create_eval_from_spec(self, **kwargs):
             captured.update(kwargs)
             return {"evalset": {"id": "evalset-123"}}
 

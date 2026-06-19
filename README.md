@@ -8,7 +8,7 @@ This repository contains reusable GitHub Actions for Datalayer workflows.
 
 ## datalayer-evals
 
-The datalayer-evals action runs Datalayer eval reports in CI and produces report artifacts.
+The datalayer-evals action runs Datalayer evals in CI and produces report artifacts.
 
 It uses the `datalayer-core` Python API directly (the `DatalayerClient` and the
 core eval-report helpers) rather than shelling out to the CLI, so the generated
@@ -47,23 +47,12 @@ agentspecs are present (for example `codemode` vs `nocodemode`), a per-case
 pass-rate-by-agentspec table is added so you can see which cases regress under
 which variant.
 
-These scores are not synthesized by the action — they are read back from the
-runs stored on the platform, so they reflect the actual evaluation of each case:
-
-- In normal eval flows, report generation reads experiments then runs from the
-	platform (via datalayer-core report helpers), and uses each run's
-	`metrics.case_results` and `metrics.avg_score` directly.
-
-- **Agent-backed runs** carry the evaluator's real per-case scores; small
-  score movement for the same case across runs without a pass/fail change is
-  expected model noise.
-- **Synthetic example runs** (seeded with `--no-agent`) are deterministic: a
-  case keeps the same score across runs unless its pass/fail outcome flips.
+Canonical score semantics, case-vs-report evaluator guidance, and interpretation
+rules (agent-backed vs synthetic behavior) are documented in the UI docs:
+[Evals](https://datalayer.ai/docs/evals).
 
 If a run does not store `case_results`, the Per-Case Outcomes section notes that
-no per-case results were recorded and only the aggregate pass rate is shown. See
-the [evals examples](https://github.com/datalayer/examples/tree/main/evals) for
-the reference scoring model.
+no per-case results were recorded and only aggregate pass-rate metrics are shown.
 
 ### Secrets
 
