@@ -37,6 +37,34 @@ Primary report mode produces, for each report:
 
 The action is implemented in Python and can be consumed from other repositories.
 
+### Per-Case Scores
+
+Every generated report includes a **Per-Case Outcomes** section, rendered by the
+`datalayer-core` report helpers from each run's `metrics.case_results`. For every
+case it shows the pass rate across the fetched runs and an **Avg Score** in the
+`[0, 1]` range (the mean of that case's per-run `score`). When multiple
+agentspecs are present (for example `codemode` vs `nocodemode`), a per-case
+pass-rate-by-agentspec table is added so you can see which cases regress under
+which variant.
+
+These scores are not synthesized by the action — they are read back from the
+runs stored on the platform, so they reflect the actual evaluation of each case:
+
+- In normal eval flows, report generation reads experiments then runs from the
+	platform (via datalayer-core report helpers), and uses each run's
+	`metrics.case_results` and `metrics.avg_score` directly.
+
+- **Agent-backed runs** carry the evaluator's real per-case scores; small
+  score movement for the same case across runs without a pass/fail change is
+  expected model noise.
+- **Synthetic example runs** (seeded with `--no-agent`) are deterministic: a
+  case keeps the same score across runs unless its pass/fail outcome flips.
+
+If a run does not store `case_results`, the Per-Case Outcomes section notes that
+no per-case results were recorded and only the aggregate pass rate is shown. See
+the [evals examples](https://github.com/datalayer/examples/tree/main/evals) for
+the reference scoring model.
+
 ### Secrets
 
 Authentication and billing context are supplied through repository secrets so
@@ -47,12 +75,30 @@ they never appear in workflow files or logs:
 | `DATALAYER_API_KEY` | `api-key` | ✅ Required | Authenticates every call the action makes to Datalayer. |
 | `DATALAYER_BILLABLE_ACCOUNT_UID` | `billable-account-uid` | Optional | Billable account context used for eval operations and any optional runtime creation. |
 
+If the selected agentspec model provider needs credentials, define those as
+GitHub secrets too and expose them as environment variables on the action step.
+
+Amazon Bedrock example (for Bedrock-hosted models referenced by agentspecs):
+
+| Secret | Required for Bedrock agentspecs | Purpose |
+| :-- | :-- | :-- |
+| `AWS_ACCESS_KEY_ID` | ✅ Yes | AWS access key used by the Bedrock client. |
+| `AWS_SECRET_ACCESS_KEY` | ✅ Yes | AWS secret key used by the Bedrock client. |
+| `AWS_DEFAULT_REGION` | ✅ Yes | Region hosting the Bedrock model endpoint. |
+
 Reference them in the consumer workflow:
 
 ```yaml
-with:
-  api-key: ${{ secrets.DATALAYER_API_KEY }}
-  billable-account-uid: ${{ secrets.DATALAYER_BILLABLE_ACCOUNT_UID }}
+- name: Run eval report (Bedrock-backed agentspec)
+	uses: datalayer/github-actions@v1
+	env:
+		AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+		AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+		AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+	with:
+		api-key: ${{ secrets.DATALAYER_API_KEY }}
+		billable-account-uid: ${{ secrets.DATALAYER_BILLABLE_ACCOUNT_UID }}
+		evalset-id: 01KXXXXXXXXXXXX
 ```
 
 To make the billable account optional at dispatch time while still defaulting to
@@ -128,6 +174,7 @@ At least one of evalset-id or evalset-spec-file must be provided.
 
 Example workflow step (single evalset):
 
+```yaml
 uses: datalayer/github-actions@v1
 with:
 	evalset-id: 01KXXXXXXXXXXXX
@@ -135,9 +182,11 @@ with:
 	run-limit: "50"
 	output-markdown: artifacts/evals-report.md
 	export-csv: "true"
+```
 
 Example workflow step with runtime bootstrap from spec id before report:
 
+```yaml
 uses: datalayer/github-actions@v1
 with:
 	evalset-id: 01KXXXXXXXXXXXX
@@ -148,9 +197,11 @@ with:
 	billable-account-uid: ${{ secrets.DATALAYER_BILLABLE_ACCOUNT_UID }}
 	output-markdown: artifacts/evals-report.md
 	export-csv: "true"
+```
 
 Example workflow step with multi-agentspec bootstrap:
 
+```yaml
 uses: datalayer/github-actions@v1
 with:
 	evalset-id: 01KXXXXXXXXXXXX
@@ -160,19 +211,23 @@ with:
 	agent-time-reservation: "10"
 	output-markdown: artifacts/evals-report.md
 	export-csv: "true"
+```
 
 The action now includes a final upload step by default (`upload-report-artifacts=true`) that publishes markdown/csv/log artifacts.
 
 To disable built-in upload and manage upload yourself:
 
+```yaml
 uses: datalayer/github-actions@v1
 with:
 	evalset-id: 01KXXXXXXXXXXXX
 	api-key: ${{ secrets.DATALAYER_API_KEY }}
 	upload-report-artifacts: "false"
+```
 
 Example workflow step (two spec files, one comparison run):
 
+```yaml
 uses: datalayer/github-actions@v1
 with:
 	evalset-spec-file: .github/evals/no-codemode.evalset.json
@@ -182,9 +237,11 @@ with:
 	secondary-output-markdown: artifacts/codemode-report.md
 	comparison-summary-output: artifacts/comparison-summary.md
 	export-csv: "true"
+```
 
 Upload artifacts in the consumer workflow:
 
+```yaml
 uses: actions/upload-artifact@v4
 with:
 	name: evals-report
@@ -192,9 +249,11 @@ with:
 		artifacts/evals-report.md
 		artifacts/evals-report.csv
 		artifacts/evals-report.md.log
+```
 
 For two-spec comparison mode, also upload:
 
+```
 		artifacts/no-codemode-report.md
 		artifacts/no-codemode-report.csv
 		artifacts/no-codemode-report.md.log
@@ -202,11 +261,13 @@ For two-spec comparison mode, also upload:
 		artifacts/codemode-report.csv
 		artifacts/codemode-report.md.log
 		artifacts/comparison-summary.md
+```
 
 ### Publish New Versions
 
 1. Commit and push changes to main.
-2. Tag a version.
+2. Tag a version.```yaml
+
 3. Push the tag.
 
 Commands:
