@@ -152,6 +152,23 @@ def _report_is_partial(report: dict[str, Any]) -> bool:
     return False
 
 
+def _partial_report_reason(report: dict[str, Any]) -> str:
+    experiments = [
+        item for item in (report.get("experiments") or []) if isinstance(item, dict)
+    ]
+    if not experiments:
+        return "no experiments in report"
+
+    empty_runs = 0
+    for experiment in experiments:
+        runs = [item for item in (experiment.get("runs") or []) if isinstance(item, dict)]
+        if not runs:
+            empty_runs += 1
+    if empty_runs:
+        return f"{empty_runs}/{len(experiments)} experiments have no runs"
+    return "unknown partial state"
+
+
 def _generate_report(
     client: DatalayerClient,
     *,
@@ -412,7 +429,10 @@ def main() -> int:
             account_uid=account_uid,
         )
     except Exception as exc:
-        print(f"Failed to resolve primary evalset: {exc}", file=sys.stderr)
+        message = f"Failed to resolve primary evalset: {exc}"
+        print(message, file=sys.stderr)
+        append_step_summary("## Datalayer Evals Report\n\n")
+        append_step_summary(f"- Error: `{message}`\n")
         return 2
 
     resolved_secondary_evalset_id = ""
@@ -425,7 +445,10 @@ def main() -> int:
                 account_uid=account_uid,
             )
         except Exception as exc:
-            print(f"Failed to resolve secondary evalset: {exc}", file=sys.stderr)
+            message = f"Failed to resolve secondary evalset: {exc}"
+            print(message, file=sys.stderr)
+            append_step_summary("## Datalayer Evals Report\n\n")
+            append_step_summary(f"- Error: `{message}`\n")
             return 2
 
     try:
@@ -438,7 +461,10 @@ def main() -> int:
             export_csv=export_csv,
         )
     except Exception as exc:
-        print(f"Failed to generate primary report: {exc}", file=sys.stderr)
+        message = f"Failed to generate primary report: {exc}"
+        print(message, file=sys.stderr)
+        append_step_summary("## Datalayer Evals Report\n\n")
+        append_step_summary(f"- Error: `{message}`\n")
         return 1
 
     secondary_outputs = {
@@ -467,7 +493,10 @@ def main() -> int:
                 export_csv=export_csv,
             )
         except Exception as exc:
-            print(f"Failed to generate secondary report: {exc}", file=sys.stderr)
+            message = f"Failed to generate secondary report: {exc}"
+            print(message, file=sys.stderr)
+            append_step_summary("## Datalayer Evals Report\n\n")
+            append_step_summary(f"- Error: `{message}`\n")
             return 1
 
         summary_path = (
@@ -559,12 +588,18 @@ def main() -> int:
         if resolved_secondary_evalset_id:
             _append_failure_summary("Secondary", secondary_report)
 
-    if _report_is_partial(primary_report) or (
-        resolved_secondary_evalset_id and _report_is_partial(secondary_report)
-    ):
-        append_step_summary(
-            "- Error: partial results detected (missing experiments or runs). Failing the action.\n"
-        )
+    primary_partial = _report_is_partial(primary_report)
+    secondary_partial = resolved_secondary_evalset_id and _report_is_partial(secondary_report)
+    if primary_partial or secondary_partial:
+        reasons: list[str] = []
+        if primary_partial:
+            reasons.append(f"primary: {_partial_report_reason(primary_report)}")
+        if secondary_partial:
+            reasons.append(f"secondary: {_partial_report_reason(secondary_report)}")
+        reason_text = "; ".join(reasons) if reasons else "missing experiments or runs"
+        message = f"Partial results detected ({reason_text}). Failing the action."
+        print(message, file=sys.stderr)
+        append_step_summary(f"- Error: {message}\n")
         return 1
 
     return 0
