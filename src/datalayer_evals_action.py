@@ -394,6 +394,7 @@ def main() -> int:
                 environment_name=agent_environment_name,
                 account_uid=account_uid or None,
                 launch_source="datalayer-github-actions",
+                execution_target="cloud",
                 log=print,
             )
             executed_evalset_id = str(execution.get("evalset_id") or "")
