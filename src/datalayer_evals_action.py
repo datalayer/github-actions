@@ -293,7 +293,148 @@ def _append_failure_summary(label: str, report: dict[str, Any]) -> int:
     return failed
 
 
+def _prepare_lane_spec(
+    *,
+    source_path: str,
+    run_environment: str,
+    output_dir: str,
+    output_file: str,
+) -> Path:
+    source = Path(source_path)
+    if not source.exists():
+        raise FileNotFoundError(f"Evalset spec file not found: {source}")
+
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    payload["run_environment"] = run_environment
+
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if output_file.strip():
+        out_path = out_dir / output_file.strip()
+    else:
+        base = source.name.removesuffix(".evalset.json").removesuffix(".json")
+        out_path = out_dir / f"{base}-{run_environment}.evalset.json"
+
+    out_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return out_path
+
+
+def _run_prepare_spec_mode() -> int:
+    evalset_spec_file = os.getenv("INPUT_EVALSET_SPEC_FILE", "").strip()
+    run_environment = os.getenv("INPUT_RUN_ENVIRONMENT", "sdk").strip() or "sdk"
+    output_dir = os.getenv("INPUT_PREPARED_SPEC_OUTPUT_DIR", "artifacts/specs").strip() or "artifacts/specs"
+    output_file = os.getenv("INPUT_PREPARED_SPEC_OUTPUT_FILE", "").strip()
+
+    if not evalset_spec_file:
+        print("prepare-spec requires evalset-spec-file", file=sys.stderr)
+        return 2
+
+    try:
+        prepared = _prepare_lane_spec(
+            source_path=evalset_spec_file,
+            run_environment=run_environment,
+            output_dir=output_dir,
+            output_file=output_file,
+        )
+    except Exception as exc:
+        print(f"Failed to prepare evalset spec: {exc}", file=sys.stderr)
+        append_step_summary("## Datalayer Evals Report\n\n")
+        append_step_summary(f"- Error: `Failed to prepare evalset spec: {exc}`\n")
+        return 1
+
+    append_github_output("prepared_spec_path", str(prepared))
+    append_github_output("spec_path", str(prepared))
+
+    append_step_summary("## Datalayer Evals Report\n\n")
+    append_step_summary("- Mode: prepare-spec\n")
+    append_step_summary(f"- Lane: {run_environment}\n")
+    append_step_summary(f"- Prepared evalset spec: {prepared}\n\n")
+    return 0
+
+
+def _run_execute_runs_mode() -> int:
+    api_key = os.getenv("INPUT_API_KEY", "").strip()
+    evalset_spec_file = os.getenv("INPUT_EVALSET_SPEC_FILE", "").strip()
+    ai_agents_url = os.getenv("INPUT_AI_AGENTS_URL", "").strip()
+    account_uid = os.getenv("INPUT_BILLABLE_ACCOUNT_UID", "").strip()
+    run_limit_raw = os.getenv("INPUT_RUN_LIMIT", "50").strip() or "50"
+    iam_url = os.getenv("INPUT_IAM_URL", "").strip()
+    runtimes_url = os.getenv("INPUT_RUNTIMES_URL", "").strip()
+    run_environment = os.getenv("INPUT_RUN_ENVIRONMENT", "sdk").strip() or "sdk"
+    agent_environment_name = os.getenv("INPUT_AGENT_ENVIRONMENT_NAME", "ai-agents-env").strip() or "ai-agents-env"
+    agent_spec_ids = parse_csv(os.getenv("INPUT_AGENT_SPEC_IDS", "").strip())
+
+    if not api_key:
+        print("Missing required input: api-key", file=sys.stderr)
+        return 2
+    if not evalset_spec_file:
+        print("execute-runs requires evalset-spec-file", file=sys.stderr)
+        return 2
+    if not agent_spec_ids:
+        print("execute-runs requires agentspec-ids", file=sys.stderr)
+        return 2
+
+    try:
+        execution_run_limit = max(1, int(run_limit_raw))
+    except ValueError:
+        execution_run_limit = 1
+
+    client = make_client(
+        api_key=api_key,
+        ai_agents_url=ai_agents_url,
+        iam_url=iam_url,
+        runtimes_url=runtimes_url,
+    )
+
+    try:
+        spec = load_evalset_spec(evalset_spec_file)
+        execution = execute_evalset_spec(
+            client,
+            spec=spec,
+            agentspec_ids=agent_spec_ids,
+            run_limit=execution_run_limit,
+            run_environment=run_environment,
+            environment_name=agent_environment_name,
+            account_uid=account_uid or None,
+            launch_source="datalayer-github-actions",
+            execution_target="cloud",
+            log=print,
+        )
+    except Exception as exc:
+        message = f"Failed to execute eval runs: {exc}"
+        print(message, file=sys.stderr)
+        append_step_summary("## Datalayer Evals Report\n\n")
+        append_step_summary(f"- Error: `{message}`\n")
+        return 1
+
+    executed_evalset_id = str(execution.get("evalset_id") or "").strip()
+    if not executed_evalset_id:
+        print("Failed to execute eval runs: missing evalset id", file=sys.stderr)
+        return 1
+
+    append_github_output("executed_evalset_id", executed_evalset_id)
+    append_github_output("evalset_id", executed_evalset_id)
+
+    append_step_summary("## Datalayer Evals Report\n\n")
+    append_step_summary("- Mode: execute-runs\n")
+    append_step_summary(f"- Lane: {run_environment}\n")
+    append_step_summary(f"- Executed evalset id: {executed_evalset_id}\n")
+    append_step_summary(f"- Agentspec ids: {', '.join(agent_spec_ids)}\n\n")
+
+    return 0
+
+
 def main() -> int:
+    mode = os.getenv("INPUT_MODE", "run-report").strip().lower() or "run-report"
+
+    if mode == "prepare-spec":
+        return _run_prepare_spec_mode()
+    if mode == "execute-runs":
+        return _run_execute_runs_mode()
+    if mode != "run-report":
+        print(f"Unsupported mode: {mode}", file=sys.stderr)
+        return 2
+
     evalset_id = os.getenv("INPUT_EVALSET_ID", "").strip()
     evalset_spec_file = os.getenv("INPUT_EVALSET_SPEC_FILE", "").strip()
     secondary_evalset_id = os.getenv("INPUT_SECONDARY_EVALSET_ID", "").strip()

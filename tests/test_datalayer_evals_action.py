@@ -214,3 +214,42 @@ def test_main_rejects_conflicting_agentspec_inputs(action_module, monkeypatch):
     exit_code = action_module.main()
 
     assert exit_code == 2
+
+
+def test_main_prepare_spec_mode_writes_lane_specific_spec(action_module, monkeypatch, tmp_path):
+    spec_file = tmp_path / "simple.evalset.json"
+    spec_file.write_text(json.dumps({"name": "simple", "cases": []}), encoding="utf-8")
+
+    output_file = tmp_path / "github_output.txt"
+    monkeypatch.setenv("INPUT_MODE", "prepare-spec")
+    monkeypatch.setenv("INPUT_EVALSET_SPEC_FILE", str(spec_file))
+    monkeypatch.setenv("INPUT_RUN_ENVIRONMENT", "sdk-proxy")
+    monkeypatch.setenv("INPUT_PREPARED_SPEC_OUTPUT_DIR", str(tmp_path / "artifacts"))
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output_file))
+    monkeypatch.setattr(action_module, "append_step_summary", lambda _text: None)
+
+    exit_code = action_module.main()
+
+    assert exit_code == 0
+    output = output_file.read_text(encoding="utf-8")
+    assert "prepared_spec_path=" in output
+
+    prepared_path = None
+    for line in output.splitlines():
+        if line.startswith("prepared_spec_path="):
+            prepared_path = Path(line.split("=", 1)[1])
+            break
+    assert prepared_path is not None
+    payload = json.loads(prepared_path.read_text(encoding="utf-8"))
+    assert payload["run_environment"] == "sdk-proxy"
+
+
+def test_main_execute_runs_mode_requires_agentspec_ids(action_module, monkeypatch):
+    monkeypatch.setenv("INPUT_MODE", "execute-runs")
+    monkeypatch.setenv("INPUT_API_KEY", "key")
+    monkeypatch.setenv("INPUT_EVALSET_SPEC_FILE", "spec.json")
+    monkeypatch.setenv("INPUT_AGENT_SPEC_IDS", "")
+
+    exit_code = action_module.main()
+
+    assert exit_code == 2
