@@ -164,7 +164,7 @@ runs:
       shell: bash
       run: |
         python -m pip install --upgrade pip
-        python -m pip install "datalayer-core>=1.1.27"
+        python -m pip install "datalayer-core>=1.1.28"
 
     - name: Run Datalayer Evals Report
       id: run
