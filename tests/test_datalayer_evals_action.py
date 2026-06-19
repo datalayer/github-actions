@@ -31,6 +31,15 @@ def action_module(monkeypatch):
         "type_counts": {},
         "failures": [],
     }
+    evals_pkg.evaluate_evalset = lambda *_args, **_kwargs: {
+        "pass_rate": 1.0,
+        "total_cases": 0,
+        "passed": 0,
+        "failed": 0,
+        "avg_score": 1.0,
+        "case_results": [],
+        "evaluator_results": [],
+    }
     evals_pkg.load_evalset_spec = lambda *_args, **_kwargs: {"name": "spec", "cases": []}
     evals_pkg.make_client = lambda *_args, **_kwargs: _StubClient()
     evals_pkg.now_iso = lambda: "2026-01-01T00:00:00Z"
@@ -161,7 +170,7 @@ def test_resolve_evalset_id_from_spec_uses_optional_account_uid(action_module, t
             captured.update(kwargs)
             return {"evalset": {"id": "evalset-123"}}
 
-    evalset_id = action_module._resolve_evalset_id(
+    evalset_id, evalset_spec, created_from_spec = action_module._resolve_evalset_id(
         FakeClient(),
         explicit_evalset_id="",
         spec_file=str(spec_file),
@@ -169,7 +178,33 @@ def test_resolve_evalset_id_from_spec_uses_optional_account_uid(action_module, t
     )
 
     assert evalset_id == "evalset-123"
+    assert isinstance(evalset_spec, dict)
+    assert created_from_spec is True
     assert captured["account_uid"] is None
+
+
+def test_report_is_partial_detects_missing_experiments_or_runs(action_module):
+    assert action_module._report_is_partial({"experiments": []}) is True
+    assert (
+        action_module._report_is_partial(
+            {
+                "experiments": [
+                    {"id": "exp-1", "runs": []},
+                ]
+            }
+        )
+        is True
+    )
+    assert (
+        action_module._report_is_partial(
+            {
+                "experiments": [
+                    {"id": "exp-1", "runs": [{"id": "run-1"}]},
+                ]
+            }
+        )
+        is False
+    )
 
 
 def test_main_rejects_conflicting_agentspec_inputs(action_module, monkeypatch):

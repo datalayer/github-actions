@@ -35,6 +35,10 @@ inputs:
     description: Optional billable account UID context used for eval operations and optional runtime creation.
     required: false
     default: ""
+  run-environment:
+    description: Optional run environment label recorded on synthetic fallback runs.
+    required: false
+    default: "sdk"
   run-limit:
     description: Runs fetched per experiment.
     required: false
@@ -177,6 +181,7 @@ runs:
         INPUT_API_KEY: ${{ inputs.api-key }}
         INPUT_AI_AGENTS_URL: ${{ inputs.ai-agents-url }}
         INPUT_BILLABLE_ACCOUNT_UID: ${{ inputs.billable-account-uid }}
+        INPUT_RUN_ENVIRONMENT: ${{ inputs.run-environment }}
         INPUT_RUN_LIMIT: ${{ inputs.run-limit }}
         INPUT_OUTPUT_MARKDOWN: ${{ inputs.output-markdown }}
         INPUT_SECONDARY_OUTPUT_MARKDOWN: ${{ inputs.secondary-output-markdown }}
