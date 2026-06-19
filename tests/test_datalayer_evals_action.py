@@ -253,3 +253,39 @@ def test_main_execute_runs_mode_requires_agentspec_ids(action_module, monkeypatc
     exit_code = action_module.main()
 
     assert exit_code == 2
+
+
+def test_parse_max_runtime_seconds_handles_bad_and_negative_values(action_module):
+    assert action_module.parse_max_runtime_seconds("") == 180.0
+    assert action_module.parse_max_runtime_seconds("abc") == 180.0
+    assert action_module.parse_max_runtime_seconds("90") == 90.0
+    assert action_module.parse_max_runtime_seconds("-5") == 0.0
+    assert action_module.parse_max_runtime_seconds("0") == 0.0
+
+
+def test_main_execute_runs_mode_forwards_max_runtime_seconds(
+    action_module, monkeypatch, tmp_path
+):
+    spec_file = tmp_path / "spec.evalset.json"
+    spec_file.write_text(json.dumps({"name": "spec", "cases": []}), encoding="utf-8")
+
+    captured = {}
+
+    def fake_execute_evalset_spec(_client, **kwargs):
+        captured.update(kwargs)
+        return {"evalset_id": "evalset-executed"}
+
+    monkeypatch.setattr(action_module, "execute_evalset_spec", fake_execute_evalset_spec)
+    monkeypatch.setattr(action_module, "append_step_summary", lambda _text: None)
+    monkeypatch.setattr(action_module, "append_github_output", lambda _key, _value: None)
+
+    monkeypatch.setenv("INPUT_MODE", "execute-runs")
+    monkeypatch.setenv("INPUT_API_KEY", "key")
+    monkeypatch.setenv("INPUT_EVALSET_SPEC_FILE", str(spec_file))
+    monkeypatch.setenv("INPUT_AGENT_SPEC_IDS", "a,b")
+    monkeypatch.setenv("INPUT_MAX_RUNTIME_SECONDS", "45")
+
+    exit_code = action_module.main()
+
+    assert exit_code == 0
+    assert captured["max_runtime_seconds"] == 45.0
