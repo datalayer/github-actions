@@ -57,19 +57,20 @@ def parse_csv(raw: str) -> list[str]:
     return values
 
 
-def parse_max_runtime_seconds(raw: str, default: float = 180.0) -> float:
-    """Parse the max-runtime-seconds input. Returns default on bad values.
+def parse_request_timeout_seconds(raw: str, default: int = 180) -> int:
+    """Parse the request-timeout-seconds input. Returns default on bad values.
 
-    A value <= 0 disables the deadline and is returned as-is (0.0).
+    The value is the per-agent-call timeout in seconds and is clamped to a
+    minimum of 1 second.
     """
     text = (raw or "").strip()
     if not text:
         return default
     try:
-        value = float(text)
+        value = int(float(text))
     except ValueError:
         return default
-    return max(0.0, value)
+    return max(1, value)
 
 
 def append_github_output(key: str, value: str) -> None:
@@ -378,8 +379,8 @@ def _run_execute_runs_mode() -> int:
     run_environment = os.getenv("INPUT_RUN_ENVIRONMENT", "sdk").strip() or "sdk"
     agent_environment_name = os.getenv("INPUT_AGENT_ENVIRONMENT_NAME", "ai-agents-env").strip() or "ai-agents-env"
     agent_spec_ids = parse_csv(os.getenv("INPUT_AGENT_SPEC_IDS", "").strip())
-    max_runtime_seconds = parse_max_runtime_seconds(
-        os.getenv("INPUT_MAX_RUNTIME_SECONDS", "180")
+    request_timeout_seconds = parse_request_timeout_seconds(
+        os.getenv("INPUT_REQUEST_TIMEOUT_SECONDS", "180")
     )
 
     if not api_key:
@@ -416,7 +417,7 @@ def _run_execute_runs_mode() -> int:
             account_uid=account_uid or None,
             launch_source="datalayer-github-actions",
             execution_target="cloud",
-            max_runtime_seconds=max_runtime_seconds,
+            request_timeout_seconds=request_timeout_seconds,
             log=print,
         )
     except Exception as exc:
@@ -555,8 +556,8 @@ def main() -> int:
                 account_uid=account_uid or None,
                 launch_source="datalayer-github-actions",
                 execution_target="cloud",
-                max_runtime_seconds=parse_max_runtime_seconds(
-                    os.getenv("INPUT_MAX_RUNTIME_SECONDS", "180")
+                request_timeout_seconds=parse_request_timeout_seconds(
+                    os.getenv("INPUT_REQUEST_TIMEOUT_SECONDS", "180")
                 ),
                 log=print,
             )

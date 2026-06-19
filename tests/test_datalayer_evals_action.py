@@ -255,15 +255,15 @@ def test_main_execute_runs_mode_requires_agentspec_ids(action_module, monkeypatc
     assert exit_code == 2
 
 
-def test_parse_max_runtime_seconds_handles_bad_and_negative_values(action_module):
-    assert action_module.parse_max_runtime_seconds("") == 180.0
-    assert action_module.parse_max_runtime_seconds("abc") == 180.0
-    assert action_module.parse_max_runtime_seconds("90") == 90.0
-    assert action_module.parse_max_runtime_seconds("-5") == 0.0
-    assert action_module.parse_max_runtime_seconds("0") == 0.0
+def test_parse_request_timeout_seconds_handles_bad_and_negative_values(action_module):
+    assert action_module.parse_request_timeout_seconds("") == 180
+    assert action_module.parse_request_timeout_seconds("abc") == 180
+    assert action_module.parse_request_timeout_seconds("90") == 90
+    assert action_module.parse_request_timeout_seconds("-5") == 1
+    assert action_module.parse_request_timeout_seconds("0") == 1
 
 
-def test_main_execute_runs_mode_forwards_max_runtime_seconds(
+def test_main_execute_runs_mode_forwards_request_timeout_seconds(
     action_module, monkeypatch, tmp_path
 ):
     spec_file = tmp_path / "spec.evalset.json"
@@ -283,9 +283,9 @@ def test_main_execute_runs_mode_forwards_max_runtime_seconds(
     monkeypatch.setenv("INPUT_API_KEY", "key")
     monkeypatch.setenv("INPUT_EVALSET_SPEC_FILE", str(spec_file))
     monkeypatch.setenv("INPUT_AGENT_SPEC_IDS", "a,b")
-    monkeypatch.setenv("INPUT_MAX_RUNTIME_SECONDS", "45")
+    monkeypatch.setenv("INPUT_REQUEST_TIMEOUT_SECONDS", "45")
 
     exit_code = action_module.main()
 
     assert exit_code == 0
-    assert captured["max_runtime_seconds"] == 45.0
+    assert captured["request_timeout_seconds"] == 45
