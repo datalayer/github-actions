@@ -171,7 +171,8 @@ def _generate_report(
         write_eval_report_csv(report, csv_path)
         csv_out = str(csv_path)
 
-    timestamp = timestamp_slug(str(report.get("generated_at", now_iso())))
+    generated_at = report.get("generated_at")
+    timestamp = timestamp_slug(str(generated_at or now_iso()))
     timestamped_md = Path(f"report-{timestamp}.md")
     timestamped_md.write_text(markdown + "\n", encoding="utf-8")
     timestamped_csv = Path(f"report-{timestamp}.csv")
