@@ -36,7 +36,7 @@ inputs:
     required: false
     default: ""
   billable-account-uid:
-    description: Optional billable account UID context used for eval operations and optional runtime creation.
+    description: Optional billable account UID context used for eval operations.
     required: false
     default: ""
   run-environment:
@@ -87,12 +87,8 @@ inputs:
     description: Optional Runtimes base URL override used by datalayer agents create.
     required: false
     default: ""
-  agentspec-id:
-    description: Optional agent spec id to create an agent runtime before reporting.
-    required: false
-    default: ""
   agentspec-ids:
-    description: Optional comma-separated agent spec ids to create multiple runtimes before reporting.
+    description: Optional comma-separated agent spec ids used by execute-runs mode (or execute-runs=true).
     required: false
     default: ""
   execute-runs:
@@ -103,22 +99,10 @@ inputs:
       and tears the runtimes down.
     required: false
     default: "false"
-  agentspec:
-    description: Optional URL or local path to YAML/JSON agent spec used before reporting.
-    required: false
-    default: ""
   agent-environment-name:
-    description: Environment for optional agent runtime creation.
+    description: Environment name used by execute-runs mode for cloud runtime execution.
     required: false
     default: "ai-agents-env"
-  agent-given-name:
-    description: Optional runtime name for agent runtime creation.
-    required: false
-    default: ""
-  agent-time-reservation:
-    description: Optional time reservation (minutes) for agent runtime creation.
-    required: false
-    default: "10"
   upload-report-artifacts:
     description: Upload generated markdown/csv/log artifacts in a final step.
     required: false
@@ -174,18 +158,6 @@ outputs:
   comparison-summary-file:
     description: Comparison summary markdown file path.
     value: ${{ steps.run.outputs.comparison_summary_file }}
-  agent-runtime-pod-name:
-    description: Pod name of optional runtime created through datalayer agents create.
-    value: ${{ steps.run.outputs.agent_runtime_pod_name }}
-  agent-runtime-ingress:
-    description: Ingress URL of optional runtime created through datalayer agents create.
-    value: ${{ steps.run.outputs.agent_runtime_ingress }}
-  agent-runtime-pod-names:
-    description: JSON array of pod names for runtimes created through agentspec-ids.
-    value: ${{ steps.run.outputs.agent_runtime_pod_names }}
-  agent-runtime-ingresses:
-    description: JSON array of ingress URLs for runtimes created through agentspec-ids.
-    value: ${{ steps.run.outputs.agent_runtime_ingresses }}
   failed-run-count:
     description: Total number of failed runs across primary and secondary reports.
     value: ${{ steps.run.outputs.failed_run_count }}
@@ -208,7 +180,7 @@ runs:
       shell: bash
       run: |
         python -m pip install --upgrade pip
-        python -m pip install "datalayer-core>=1.1.36"
+        python -m pip install "datalayer-core>=1.1.37"
 
     - name: Run Datalayer Evals Report
       id: run
@@ -233,13 +205,9 @@ runs:
         INPUT_EXPORT_CSV: ${{ inputs.export-csv }}
         INPUT_IAM_URL: ${{ inputs.iam-url }}
         INPUT_RUNTIMES_URL: ${{ inputs.runtimes-url }}
-        INPUT_AGENT_SPEC_ID: ${{ inputs.agentspec-id }}
         INPUT_AGENT_SPEC_IDS: ${{ inputs.agentspec-ids }}
-        INPUT_AGENT_SPEC: ${{ inputs.agentspec }}
         INPUT_EXECUTE_RUNS: ${{ inputs.execute-runs }}
         INPUT_AGENT_ENVIRONMENT_NAME: ${{ inputs.agent-environment-name }}
-        INPUT_AGENT_GIVEN_NAME: ${{ inputs.agent-given-name }}
-        INPUT_AGENT_TIME_RESERVATION: ${{ inputs.agent-time-reservation }}
       run: python ${{ github.action_path }}/src/datalayer_evals_action.py
 
     - name: Upload Datalayer report artifacts

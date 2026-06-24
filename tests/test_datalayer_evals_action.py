@@ -110,43 +110,6 @@ def test_parse_csv_dedupes_and_strips(action_module):
     assert action_module.parse_csv("a, b,a,, c ") == ["a", "b", "c"]
 
 
-def test_create_agent_runtime_billable_account_optional(action_module, monkeypatch):
-    calls = {}
-
-    def fake_create_cloud_agent_runtime(_client, **kwargs):
-        calls["kwargs"] = kwargs
-        return types.SimpleNamespace(pod_name="pod-1", ingress="https://ing-1")
-
-    monkeypatch.setattr(action_module, "create_cloud_agent_runtime", fake_create_cloud_agent_runtime)
-
-    client = object()
-
-    pod_name, ingress = action_module._create_agent_runtime(
-        client,
-        environment_name="env",
-        given_name="",
-        time_reservation="10",
-        agent_spec_id="example-simple",
-        agent_spec="",
-        billable_account_uid="",
-    )
-
-    assert pod_name == "pod-1"
-    assert ingress == "https://ing-1"
-    assert calls["kwargs"]["billable_account_uid"] is None
-
-    action_module._create_agent_runtime(
-        client,
-        environment_name="env",
-        given_name="",
-        time_reservation="10",
-        agent_spec_id="example-simple",
-        agent_spec="",
-        billable_account_uid="acct-123",
-    )
-    assert calls["kwargs"]["billable_account_uid"] == "acct-123"
-
-
 def test_resolve_evalset_id_from_spec_uses_optional_account_uid(action_module, tmp_path):
     spec_file = tmp_path / "evalset.json"
     spec_file.write_text(
@@ -200,20 +163,6 @@ def test_report_is_partial_detects_missing_experiments_or_runs(action_module):
         )
         is False
     )
-
-
-def test_main_rejects_conflicting_agentspec_inputs(action_module, monkeypatch):
-    monkeypatch.setenv("INPUT_API_KEY", "key")
-    monkeypatch.setenv("INPUT_AGENT_SPEC_IDS", "a,b")
-    monkeypatch.setenv("INPUT_AGENT_SPEC_ID", "a")
-    monkeypatch.setenv("INPUT_AGENT_SPEC", "")
-
-    # Avoid accidental file writes/summary writes from future logic changes.
-    monkeypatch.setattr(action_module, "append_step_summary", lambda _text: None)
-
-    exit_code = action_module.main()
-
-    assert exit_code == 2
 
 
 def test_main_prepare_spec_mode_writes_lane_specific_spec(action_module, monkeypatch, tmp_path):

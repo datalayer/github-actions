@@ -21,10 +21,8 @@ It supports two execution modes:
 - Primary report mode (single evalset).
 - Comparison mode (primary + secondary evalsets) with a generated summary markdown.
 
-It also supports optional multi-agentspec runtime bootstrap before reporting via:
-
-- `agentspec-id` (single)
-- `agentspec-ids` (comma-separated list)
+Real run execution is runner-first and uses `datalayer_core.evals.execute_evalset_spec`
+with one runtime per agentspec id when `execute-runs` is enabled.
 
 Evalsets can be provided as IDs, or created on the fly from spec files.
 
@@ -62,7 +60,7 @@ they never appear in workflow files or logs:
 | Secret | Maps to input | Required | Purpose |
 | :-- | :-- | :-- | :-- |
 | `DATALAYER_API_KEY` | `api-key` | ✅ Required | Authenticates every call the action makes to Datalayer. |
-| `DATALAYER_BILLABLE_ACCOUNT_UID` | `billable-account-uid` | Optional | Billable account context used for eval operations and any optional runtime creation. |
+| `DATALAYER_BILLABLE_ACCOUNT_UID` | `billable-account-uid` | Optional | Billable account context used for eval operations. |
 
 If the selected agentspec model provider needs credentials, define those as
 GitHub secrets too and expose them as environment variables on the action step.
@@ -112,7 +110,7 @@ any timestamped/secondary/comparison files) as a build artifact in a final step
 - secondary-evalset-spec-file: optional, path to secondary evalset spec JSON
 - api-key: required, Datalayer API key
 - ai-agents-url: optional, override API URL
-- billable-account-uid: optional, billable account UID context for eval operations and optional runtime creation
+- billable-account-uid: optional, billable account UID context for eval operations
 
 When `billable-account-uid` is omitted (or empty), the action does not force a
 billing override and calls run in the default account context for the API key.
@@ -123,18 +121,10 @@ billing override and calls run in the default account context for the API key.
 - export-csv: optional, default true
 - upload-report-artifacts: optional, default true; uploads generated markdown/csv/log artifacts in a final step
 - report-artifact-name: optional, default datalayer-evals-reports
-- iam-url: optional, IAM URL override used when creating the optional agent runtime
-- runtimes-url: optional, Runtimes URL override used when creating the optional agent runtime
-- agentspec-id: optional, create an agent runtime before reporting using this spec id (default example-simple)
-- agentspec-ids: optional, comma-separated list of spec ids for multi-runtime bootstrap before reporting
-- agentspec: optional, URL or local file path to YAML/JSON agent spec; mutually exclusive with agentspec-id
-- agent-environment-name: optional, default ai-agents-env
-- agent-given-name: optional runtime name for the created agent runtime
-- agent-time-reservation: optional runtime reservation in minutes, default 10
-
-When the action creates a runtime via agentspec-id or agentspec, it
-automatically tears the runtime down after report generation (including
-early-exit paths).
+- iam-url: optional, IAM URL override used by execute-runs mode
+- runtimes-url: optional, Runtimes URL override used by execute-runs mode
+- agentspec-ids: optional, comma-separated list of spec ids for execute-runs mode
+- agent-environment-name: optional, default ai-agents-env; used by execute-runs mode
 
 At least one of evalset-id or evalset-spec-file must be provided.
 
@@ -151,10 +141,6 @@ At least one of evalset-id or evalset-spec-file must be provided.
 - secondary-timestamped-report-file: secondary timestamped markdown
 - secondary-timestamped-csv-file: secondary timestamped CSV
 - comparison-summary-file: generated comparison summary markdown
-- agent-runtime-pod-name: pod name of runtime optionally created through the core client
-- agent-runtime-ingress: ingress URL of that optional runtime
-- agent-runtime-pod-names: JSON array of pod names created through agentspec-ids
-- agent-runtime-ingresses: JSON array of ingress URLs created through agentspec-ids
 - failed-run-count: total number of failed runs across primary and secondary reports
 - primary-failed-run-count: number of failed runs in the primary report
 - secondary-failed-run-count: number of failed runs in the secondary report
@@ -173,31 +159,18 @@ with:
 	export-csv: "true"
 ```
 
-Example workflow step with runtime bootstrap from spec id before report:
+Example workflow step with execute-runs (runner-backed):
 
 ```yaml
 uses: datalayer/github-actions@v1
 with:
 	evalset-id: 01KXXXXXXXXXXXX
 	api-key: ${{ secrets.DATALAYER_API_KEY }}
-	agentspec-id: example-simple
-	agent-environment-name: ai-agents-env
-	agent-time-reservation: "10"
-	billable-account-uid: ${{ secrets.DATALAYER_BILLABLE_ACCOUNT_UID }}
-	output-markdown: artifacts/evals-report.md
-	export-csv: "true"
-```
-
-Example workflow step with multi-agentspec bootstrap:
-
-```yaml
-uses: datalayer/github-actions@v1
-with:
-	evalset-id: 01KXXXXXXXXXXXX
-	api-key: ${{ secrets.DATALAYER_API_KEY }}
+	evalset-spec-file: .github/evals/spec.evalset.json
+	execute-runs: "true"
 	agentspec-ids: example-evals,example-evals-nocodemode
 	agent-environment-name: ai-agents-env
-	agent-time-reservation: "10"
+	billable-account-uid: ${{ secrets.DATALAYER_BILLABLE_ACCOUNT_UID }}
 	output-markdown: artifacts/evals-report.md
 	export-csv: "true"
 ```
