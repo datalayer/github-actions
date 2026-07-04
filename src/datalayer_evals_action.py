@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from datalayer_core.client import DatalayerClient
 from datalayer_core.evals import (
     average_latest_pass_rate,
     build_eval_report,
@@ -327,6 +328,12 @@ def _run_execute_runs_mode() -> int:
     runtimes_url = os.getenv("INPUT_RUNTIMES_URL", "").strip()
     run_environment = os.getenv("INPUT_RUN_ENVIRONMENT", "sdk").strip() or "sdk"
     agent_environment_name = os.getenv("INPUT_AGENT_ENVIRONMENT_NAME", "ai-agents-env").strip() or "ai-agents-env"
+    execution_target = os.getenv("INPUT_EXECUTION_TARGET", "cloud").strip().lower() or "cloud"
+    auto_start_local_agent_runtime = as_bool(
+        os.getenv("INPUT_AUTO_START_LOCAL_AGENT_RUNTIME", "false")
+    )
+    local_agent_base_url = os.getenv("INPUT_LOCAL_AGENT_BASE_URL", "").strip()
+    local_agent_name = os.getenv("INPUT_LOCAL_AGENT_NAME", "").strip()
     agent_spec_ids = parse_csv(os.getenv("INPUT_AGENT_SPEC_IDS", "").strip())
     request_timeout_seconds = parse_request_timeout_seconds(
         os.getenv("INPUT_REQUEST_TIMEOUT_SECONDS", "180")
@@ -340,6 +347,9 @@ def _run_execute_runs_mode() -> int:
         return 2
     if not agent_spec_ids:
         print("execute-runs requires agentspec-ids", file=sys.stderr)
+        return 2
+    if execution_target not in {"cloud", "local"}:
+        print("execute-runs execution-target must be 'cloud' or 'local'", file=sys.stderr)
         return 2
 
     client = make_client(
@@ -357,6 +367,10 @@ def _run_execute_runs_mode() -> int:
             run_limit_raw=run_limit_raw,
             run_environment=run_environment,
             agent_environment_name=agent_environment_name,
+            execution_target=execution_target,
+            auto_start_local_agent_runtime=auto_start_local_agent_runtime,
+            local_agent_base_url=local_agent_base_url,
+            local_agent_name=local_agent_name,
             account_uid=account_uid,
             request_timeout_seconds=request_timeout_seconds,
         )
@@ -373,6 +387,7 @@ def _run_execute_runs_mode() -> int:
     append_step_summary("## Datalayer Evals Report\n\n")
     append_step_summary("- Mode: execute-runs\n")
     append_step_summary(f"- Lane: {run_environment}\n")
+    append_step_summary(f"- Execution target: {execution_target}\n")
     append_step_summary(f"- Executed evalset id: {executed_evalset_id}\n")
     append_step_summary(f"- Agentspec ids: {', '.join(agent_spec_ids)}\n\n")
 
@@ -381,12 +396,16 @@ def _run_execute_runs_mode() -> int:
 
 def _execute_eval_runs(
     *,
-    client: Any,
+    client: DatalayerClient,
     evalset_spec_file: str,
     agent_spec_ids: list[str],
     run_limit_raw: str,
     run_environment: str,
     agent_environment_name: str,
+    execution_target: str,
+    auto_start_local_agent_runtime: bool,
+    local_agent_base_url: str,
+    local_agent_name: str,
     account_uid: str,
     request_timeout_seconds: int,
 ) -> str:
@@ -403,9 +422,12 @@ def _execute_eval_runs(
         run_limit=execution_run_limit,
         run_environment=run_environment,
         environment_name=agent_environment_name,
+        local_agent_base_url=local_agent_base_url or None,
+        local_agent_name=local_agent_name or None,
+        auto_start_local_agent_runtime=bool(auto_start_local_agent_runtime),
         account_uid=account_uid or None,
         launch_source="datalayer-github-actions",
-        execution_target="cloud",
+        execution_target=execution_target,
         request_timeout_seconds=request_timeout_seconds,
         log=print,
     )
@@ -444,6 +466,12 @@ def main() -> int:
     agent_environment_name = os.getenv("INPUT_AGENT_ENVIRONMENT_NAME", "ai-agents-env").strip() or "ai-agents-env"
     execute_runs = as_bool(os.getenv("INPUT_EXECUTE_RUNS", "false"))
     run_environment = os.getenv("INPUT_RUN_ENVIRONMENT", "sdk").strip() or "sdk"
+    execution_target = os.getenv("INPUT_EXECUTION_TARGET", "cloud").strip().lower() or "cloud"
+    auto_start_local_agent_runtime = as_bool(
+        os.getenv("INPUT_AUTO_START_LOCAL_AGENT_RUNTIME", "false")
+    )
+    local_agent_base_url = os.getenv("INPUT_LOCAL_AGENT_BASE_URL", "").strip()
+    local_agent_name = os.getenv("INPUT_LOCAL_AGENT_NAME", "").strip()
 
     if not api_key:
         print("Missing required input: api-key", file=sys.stderr)
@@ -471,6 +499,9 @@ def main() -> int:
         if not agent_spec_ids:
             print("execute-runs requires agentspec-ids", file=sys.stderr)
             return 2
+        if execution_target not in {"cloud", "local"}:
+            print("execute-runs execution-target must be 'cloud' or 'local'", file=sys.stderr)
+            return 2
         try:
             executed_evalset_id = _execute_eval_runs(
                 client=client,
@@ -479,6 +510,10 @@ def main() -> int:
                 run_limit_raw=run_limit_raw,
                 run_environment=run_environment,
                 agent_environment_name=agent_environment_name,
+                execution_target=execution_target,
+                auto_start_local_agent_runtime=auto_start_local_agent_runtime,
+                local_agent_base_url=local_agent_base_url,
+                local_agent_name=local_agent_name,
                 account_uid=account_uid,
                 request_timeout_seconds=parse_request_timeout_seconds(
                     os.getenv("INPUT_REQUEST_TIMEOUT_SECONDS", "180")
@@ -614,6 +649,7 @@ def main() -> int:
         append_step_summary(f"- Primary evalset: {resolved_evalset_id}\n")
         if executed_evalset_id:
             append_step_summary(f"- Executed evalset (real runs): {executed_evalset_id}\n")
+            append_step_summary(f"- Execution target: {execution_target}\n")
         append_step_summary(f"- Primary markdown report: {primary_outputs['report_file']}\n")
         if primary_outputs["csv_file"]:
             append_step_summary(f"- Primary CSV report: {primary_outputs['csv_file']}\n")

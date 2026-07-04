@@ -103,6 +103,24 @@ inputs:
     description: Environment name used by execute-runs mode for cloud runtime execution.
     required: false
     default: "ai-agents-env"
+  execution-target:
+    description: Runtime execution target for execute-runs mode (cloud or local).
+    required: false
+    default: "cloud"
+  auto-start-local-agent-runtime:
+    description: >-
+      When execution-target=local, automatically start a local agent-runtimes
+      server if none is reachable at local-agent-base-url.
+    required: false
+    default: "false"
+  local-agent-base-url:
+    description: Local agent-runtimes base URL used when execution-target=local.
+    required: false
+    default: "http://127.0.0.1:8765"
+  local-agent-name:
+    description: Local agent id used when execution-target=local.
+    required: false
+    default: "default"
   upload-report-artifacts:
     description: Upload generated markdown/csv/log artifacts in a final step.
     required: false
@@ -208,6 +226,10 @@ runs:
         INPUT_AGENT_SPEC_IDS: ${{ inputs.agentspec-ids }}
         INPUT_EXECUTE_RUNS: ${{ inputs.execute-runs }}
         INPUT_AGENT_ENVIRONMENT_NAME: ${{ inputs.agent-environment-name }}
+        INPUT_EXECUTION_TARGET: ${{ inputs.execution-target }}
+        INPUT_AUTO_START_LOCAL_AGENT_RUNTIME: ${{ inputs.auto-start-local-agent-runtime }}
+        INPUT_LOCAL_AGENT_BASE_URL: ${{ inputs.local-agent-base-url }}
+        INPUT_LOCAL_AGENT_NAME: ${{ inputs.local-agent-name }}
       run: python ${{ github.action_path }}/src/datalayer_evals_action.py
 
     - name: Upload Datalayer report artifacts

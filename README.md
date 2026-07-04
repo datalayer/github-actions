@@ -125,6 +125,10 @@ billing override and calls run in the default account context for the API key.
 - runtimes-url: optional, Runtimes URL override used by execute-runs mode
 - agentspec-ids: optional, comma-separated list of spec ids for execute-runs mode
 - agent-environment-name: optional, default ai-agents-env; used by execute-runs mode
+- execution-target: optional, default cloud; one of cloud or local for execute-runs mode
+- auto-start-local-agent-runtime: optional, default false; when local, auto-start a local agent-runtimes server if none is reachable
+- local-agent-base-url: optional, default http://127.0.0.1:8765; local runtime base URL when execution-target=local
+- local-agent-name: optional, default default; local agent id when execution-target=local
 
 At least one of evalset-id or evalset-spec-file must be provided.
 
@@ -170,8 +174,27 @@ with:
 	execute-runs: "true"
 	agentspec-ids: example-evals,example-evals-nocodemode
 	agent-environment-name: ai-agents-env
+	execution-target: cloud
 	billable-account-uid: ${{ secrets.DATALAYER_BILLABLE_ACCOUNT_UID }}
 	output-markdown: artifacts/evals-report.md
+	export-csv: "true"
+```
+
+Example workflow step with execute-runs on local agent-runtimes:
+
+```yaml
+uses: datalayer/github-actions@v1
+with:
+	evalset-id: 01KXXXXXXXXXXXX
+	api-key: ${{ secrets.DATALAYER_API_KEY }}
+	evalset-spec-file: .github/evals/spec.evalset.json
+	execute-runs: "true"
+	agentspec-ids: example-evals
+	execution-target: local
+	auto-start-local-agent-runtime: "true"
+	local-agent-base-url: http://127.0.0.1:8765
+	local-agent-name: default
+	output-markdown: artifacts/evals-local-report.md
 	export-csv: "true"
 ```
 
