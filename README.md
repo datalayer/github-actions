@@ -10,8 +10,8 @@ This repository contains reusable GitHub Actions for Datalayer workflows.
 
 The datalayer-evals action runs Datalayer evals in CI and produces report artifacts.
 
-It uses the `datalayer-core` Python API directly (the `DatalayerClient` and the
-core eval-report helpers) rather than shelling out to the CLI, so the generated
+It uses the `datalayer-core` `DatalayerClient` and the `agent-runtimes`
+eval-report helpers directly rather than shelling out to the CLI, so the generated
 reports contain the full structured failure diagnostics (per-run failure causes,
 stages, types and detail excerpts). Failures are also aggregated into the GitHub
 step summary and exposed as action outputs.
@@ -21,8 +21,8 @@ It supports two execution modes:
 - Primary report mode (single evalset).
 - Comparison mode (primary + secondary evalsets) with a generated summary markdown.
 
-Real run execution is runner-first and uses `datalayer_core.evals.execute_evalset_spec`
-with one runtime per agentspec id when `execute-runs` is enabled.
+Real run execution is runner-first and uses `agent_runtimes.evals.saas.execute_evalset_spec`
+with one runtime per agentspec id in `mode=execute-runs`.
 
 Evalsets can be provided as IDs, or created on the fly from spec files.
 
@@ -38,7 +38,7 @@ The action is implemented in Python and can be consumed from other repositories.
 ### Per-Case Scores
 
 Every generated report includes a **Per-Case Outcomes** section, rendered by the
-`datalayer-core` report helpers from each run's `metrics.case_results`. For every
+`agent-runtimes` report helpers from each run's `metrics.case_results`. For every
 case it shows the pass rate across the fetched runs and an **Avg Score** in the
 `[0, 1]` range (the mean of that case's per-run `score`). When multiple
 agentspecs are present (for example `codemode` vs `nocodemode`), a per-case
@@ -121,11 +121,11 @@ billing override and calls run in the default account context for the API key.
 - export-csv: optional, default true
 - upload-report-artifacts: optional, default true; uploads generated markdown/csv/log artifacts in a final step
 - report-artifact-name: optional, default datalayer-evals-reports
-- iam-url: optional, IAM URL override used by execute-runs mode
-- runtimes-url: optional, Runtimes URL override used by execute-runs mode
-- agentspec-ids: optional, comma-separated list of spec ids for execute-runs mode
-- agent-environment-name: optional, default ai-agents-env; used by execute-runs mode
-- execution-target: optional, default cloud; one of cloud or local for execute-runs mode
+- iam-url: optional, IAM URL override used by mode=execute-runs
+- runtimes-url: optional, Runtimes URL override used by mode=execute-runs
+- agentspec-ids: optional, comma-separated list of spec ids for mode=execute-runs
+- agent-environment-name: optional, default ai-agents-env; used by mode=execute-runs
+- execution-target: optional, default cloud; one of cloud or local for mode=execute-runs
 - auto-start-local-agent-runtime: optional, default false; when local, auto-start a local agent-runtimes server if none is reachable
 - local-agent-base-url: optional, default http://127.0.0.1:8765; local runtime base URL when execution-target=local
 - local-agent-name: optional, default default; local agent id when execution-target=local
@@ -168,10 +168,10 @@ Example workflow step with execute-runs (runner-backed):
 ```yaml
 uses: datalayer/github-actions@v1
 with:
+	mode: execute-runs
 	evalset-id: 01KXXXXXXXXXXXX
 	api-key: ${{ secrets.DATALAYER_API_KEY }}
 	evalset-spec-file: .github/evals/spec.evalset.json
-	execute-runs: "true"
 	agentspec-ids: example-evals,example-evals-nocodemode
 	agent-environment-name: ai-agents-env
 	execution-target: cloud
@@ -185,10 +185,10 @@ Example workflow step with execute-runs on local agent-runtimes:
 ```yaml
 uses: datalayer/github-actions@v1
 with:
+	mode: execute-runs
 	evalset-id: 01KXXXXXXXXXXXX
 	api-key: ${{ secrets.DATALAYER_API_KEY }}
 	evalset-spec-file: .github/evals/spec.evalset.json
-	execute-runs: "true"
 	agentspec-ids: example-evals
 	execution-target: local
 	auto-start-local-agent-runtime: "true"

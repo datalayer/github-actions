@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Run datalayer evals reports from GitHub Actions via the datalayer-core API.
+"""Run eval reports from GitHub Actions via the agent-runtimes API.
 
 This action talks to the Datalayer platform through the ``datalayer-core``
-Python client and its eval-report helpers directly (no CLI subprocess), so the
-generated reports include the full structured failure diagnostics that the core
-report renders (per-run failure causes, stages, types and detail excerpts). The
-action also aggregates those failures into the GitHub step summary and exposes
-them as action outputs.
+client (``DatalayerClient``) and the ``agent-runtimes`` eval-report helpers
+directly (no CLI subprocess), so the generated reports include the full
+structured failure diagnostics that the report engine renders (per-run failure
+causes, stages, types and detail excerpts). The action also aggregates those
+failures into the GitHub step summary and exposes them as action outputs.
+
+For ``execution_target=local``, runtime lifecycle/debug operations are expected
+to be handled with the ``agent-runtimes`` CLI.
 """
 
 from __future__ import annotations
@@ -17,8 +20,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from datalayer_core.client import DatalayerClient
-from datalayer_core.evals import (
+from agent_runtimes.client import DatalayerClient
+from agent_runtimes.evals.saas import (
     average_latest_pass_rate,
     build_eval_report,
     collect_report_failures,
@@ -388,6 +391,13 @@ def _run_execute_runs_mode() -> int:
     append_step_summary("- Mode: execute-runs\n")
     append_step_summary(f"- Lane: {run_environment}\n")
     append_step_summary(f"- Execution target: {execution_target}\n")
+    if execution_target == "local":
+        append_step_summary(
+            f"- Local runtime endpoint: {local_agent_base_url or 'http://127.0.0.1:8765'}\n"
+        )
+        append_step_summary(
+            "- Local runtime CLI: `agent-runtimes serve --port 8765 --find-free-port`\n"
+        )
     append_step_summary(f"- Executed evalset id: {executed_evalset_id}\n")
     append_step_summary(f"- Agentspec ids: {', '.join(agent_spec_ids)}\n\n")
 
@@ -462,16 +472,6 @@ def main() -> int:
     export_csv = as_bool(os.getenv("INPUT_EXPORT_CSV", "true"))
     iam_url = os.getenv("INPUT_IAM_URL", "").strip()
     runtimes_url = os.getenv("INPUT_RUNTIMES_URL", "").strip()
-    agent_spec_ids_raw = os.getenv("INPUT_AGENT_SPEC_IDS", "").strip()
-    agent_environment_name = os.getenv("INPUT_AGENT_ENVIRONMENT_NAME", "ai-agents-env").strip() or "ai-agents-env"
-    execute_runs = as_bool(os.getenv("INPUT_EXECUTE_RUNS", "false"))
-    run_environment = os.getenv("INPUT_RUN_ENVIRONMENT", "sdk").strip() or "sdk"
-    execution_target = os.getenv("INPUT_EXECUTION_TARGET", "cloud").strip().lower() or "cloud"
-    auto_start_local_agent_runtime = as_bool(
-        os.getenv("INPUT_AUTO_START_LOCAL_AGENT_RUNTIME", "false")
-    )
-    local_agent_base_url = os.getenv("INPUT_LOCAL_AGENT_BASE_URL", "").strip()
-    local_agent_name = os.getenv("INPUT_LOCAL_AGENT_NAME", "").strip()
 
     if not api_key:
         print("Missing required input: api-key", file=sys.stderr)
@@ -489,43 +489,7 @@ def main() -> int:
         runtimes_url=runtimes_url,
     )
 
-    agent_spec_ids = parse_csv(agent_spec_ids_raw)
-
     executed_evalset_id = ""
-    if execute_runs:
-        if not evalset_spec_file:
-            print("execute-runs requires evalset-spec-file", file=sys.stderr)
-            return 2
-        if not agent_spec_ids:
-            print("execute-runs requires agentspec-ids", file=sys.stderr)
-            return 2
-        if execution_target not in {"cloud", "local"}:
-            print("execute-runs execution-target must be 'cloud' or 'local'", file=sys.stderr)
-            return 2
-        try:
-            executed_evalset_id = _execute_eval_runs(
-                client=client,
-                evalset_spec_file=evalset_spec_file,
-                agent_spec_ids=agent_spec_ids,
-                run_limit_raw=run_limit_raw,
-                run_environment=run_environment,
-                agent_environment_name=agent_environment_name,
-                execution_target=execution_target,
-                auto_start_local_agent_runtime=auto_start_local_agent_runtime,
-                local_agent_base_url=local_agent_base_url,
-                local_agent_name=local_agent_name,
-                account_uid=account_uid,
-                request_timeout_seconds=parse_request_timeout_seconds(
-                    os.getenv("INPUT_REQUEST_TIMEOUT_SECONDS", "180")
-                ),
-            )
-            evalset_id = executed_evalset_id
-        except Exception as exc:
-            message = f"Failed to execute eval runs: {exc}"
-            print(message, file=sys.stderr)
-            append_step_summary("## Datalayer Evals Report\n\n")
-            append_step_summary(f"- Error: `{message}`\n\n")
-            return 1
 
     try:
         resolved_evalset_id = _resolve_evalset_id(

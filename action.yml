@@ -1,5 +1,5 @@
 name: datalayer-evals
-description: Run Datalayer eval reports from CI using the datalayer-core Python API.
+description: Run Datalayer eval reports from CI using the agent-runtimes Python API.
 author: Datalayer
 
 branding:
@@ -76,29 +76,21 @@ inputs:
     required: false
     default: ""
   export-csv:
-    description: Export report.csv from datalayer evals report --export.
+    description: Export report.csv from agent-runtimes evals report --export.
     required: false
     default: "true"
   iam-url:
-    description: Optional IAM base URL override used by datalayer agents create.
+    description: Optional IAM base URL override used by agent-runtimes agents create.
     required: false
     default: ""
   runtimes-url:
-    description: Optional Runtimes base URL override used by datalayer agents create.
+    description: Optional Runtimes base URL override used by agent-runtimes agents create.
     required: false
     default: ""
   agentspec-ids:
-    description: Optional comma-separated agent spec ids used by execute-runs mode (or execute-runs=true).
+    description: Optional comma-separated agent spec ids used by execute-runs mode.
     required: false
     default: ""
-  execute-runs:
-    description: >-
-      When true, execute real eval runs before reporting. Requires evalset-spec-file
-      and agentspec-ids. The action creates the evalset, launches one cloud runtime
-      per agentspec, runs every case run-limit times, grades outputs, persists runs,
-      and tears the runtimes down.
-    required: false
-    default: "false"
   agent-environment-name:
     description: Environment name used by execute-runs mode for cloud runtime execution.
     required: false
@@ -141,10 +133,10 @@ outputs:
     description: Path to generated markdown report.
     value: ${{ steps.run.outputs.report_file }}
   evalset-id:
-    description: Evalset id used for the primary report (created when executing runs or from a spec).
+    description: Evalset id used for the primary report (created from a spec or provided directly).
     value: ${{ steps.run.outputs.evalset_id }}
   executed-evalset-id:
-    description: Evalset id created when execute-runs is enabled (empty otherwise).
+    description: Evalset id created in mode=execute-runs (empty otherwise).
     value: ${{ steps.run.outputs.executed_evalset_id }}
   csv-file:
     description: Path to generated CSV report (empty when export-csv=false).
@@ -194,11 +186,11 @@ runs:
       with:
         python-version: "3.12"
 
-    - name: Install datalayer-core
+    - name: Install agent-runtimes
       shell: bash
       run: |
         python -m pip install --upgrade pip
-        python -m pip install "datalayer-core>=1.1.39"
+        python -m pip install "agent-runtimes>=0.0.1" "datalayer-core>=1.1.39"
 
     - name: Run Datalayer Evals Report
       id: run
@@ -224,7 +216,6 @@ runs:
         INPUT_IAM_URL: ${{ inputs.iam-url }}
         INPUT_RUNTIMES_URL: ${{ inputs.runtimes-url }}
         INPUT_AGENT_SPEC_IDS: ${{ inputs.agentspec-ids }}
-        INPUT_EXECUTE_RUNS: ${{ inputs.execute-runs }}
         INPUT_AGENT_ENVIRONMENT_NAME: ${{ inputs.agent-environment-name }}
         INPUT_EXECUTION_TARGET: ${{ inputs.execution-target }}
         INPUT_AUTO_START_LOCAL_AGENT_RUNTIME: ${{ inputs.auto-start-local-agent-runtime }}
