@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import inspect
 import sys
 from pathlib import Path
 from typing import Any
@@ -425,22 +426,35 @@ def _execute_eval_runs(
         execution_run_limit = 1
 
     spec = load_evalset_spec(evalset_spec_file)
-    execution = execute_evalset_spec(
-        client,
-        spec=spec,
-        agentspec_ids=agent_spec_ids,
-        run_limit=execution_run_limit,
-        run_environment=run_environment,
-        environment_name=agent_environment_name,
-        local_agent_base_url=local_agent_base_url or None,
-        local_agent_name=local_agent_name or None,
-        auto_start_local_agent_runtime=bool(auto_start_local_agent_runtime),
-        account_uid=account_uid or None,
-        launch_source="datalayer-github-actions",
-        execution_target=execution_target,
-        request_timeout_seconds=request_timeout_seconds,
-        log=print,
+    exec_kwargs: dict[str, Any] = {
+        "spec": spec,
+        "agentspec_ids": agent_spec_ids,
+        "run_limit": execution_run_limit,
+        "run_environment": run_environment,
+        "environment_name": agent_environment_name,
+        "local_agent_base_url": local_agent_base_url or None,
+        "local_agent_name": local_agent_name or None,
+        "auto_start_local_agent_runtime": bool(auto_start_local_agent_runtime),
+        "account_uid": account_uid or None,
+        "launch_source": "datalayer-github-actions",
+        "execution_target": execution_target,
+        "request_timeout_seconds": request_timeout_seconds,
+        "log": print,
+    }
+
+    signature = inspect.signature(execute_evalset_spec)
+    accepts_var_kwargs = any(
+        param.kind == inspect.Parameter.VAR_KEYWORD
+        for param in signature.parameters.values()
     )
+    if not accepts_var_kwargs:
+        exec_kwargs = {
+            key: value
+            for key, value in exec_kwargs.items()
+            if key in signature.parameters
+        }
+
+    execution = execute_evalset_spec(client, **exec_kwargs)
     executed_evalset_id = str(execution.get("evalset_id") or "").strip()
     if not executed_evalset_id:
         raise RuntimeError("Runner did not return an evalset id.")
