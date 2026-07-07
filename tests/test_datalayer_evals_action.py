@@ -19,7 +19,7 @@ def action_module(monkeypatch):
     agents_cmd_mod = types.ModuleType("datalayer_core.cli.commands.agents")
     agents_cmd_mod._load_agent_spec = lambda _: {"name": "spec"}
 
-    evals_pkg = types.ModuleType("agent_runtimes.evals.saas")
+    evals_pkg = types.ModuleType("agent_runtimes.evals.remote")
     evals_pkg.build_eval_report = lambda *_args, **_kwargs: {
         "generated_at": "2026-01-01T00:00:00Z",
         "experiments": [],
@@ -58,8 +58,7 @@ def action_module(monkeypatch):
 
     client_mod.DatalayerClient = _StubClient
     client_pkg.DatalayerClient = _StubClient
-    agent_runtimes_client_pkg.DatalayerClient = _StubClient
-    agent_runtimes_client_pkg.RuntimeClient = _StubClient
+    agent_runtimes_client_pkg.AgentClient = _StubClient
 
     agents_mod = types.ModuleType("datalayer_core.agents")
     agents_mod.create_cloud_agent_runtime = lambda *args, **kwargs: types.SimpleNamespace(
@@ -93,7 +92,7 @@ def action_module(monkeypatch):
         "datalayer_core.cli.commands.agents": agents_cmd_mod,
         "agent_runtimes": agent_runtimes_pkg,
         "agent_runtimes.evals": agent_runtimes_evals_pkg,
-        "agent_runtimes.evals.saas": evals_pkg,
+        "agent_runtimes.evals.remote": evals_pkg,
         "agent_runtimes.client": agent_runtimes_client_pkg,
         "datalayer_core.client": client_pkg,
         "datalayer_core.client.client": client_mod,

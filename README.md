@@ -10,7 +10,7 @@ This repository contains reusable GitHub Actions for Datalayer workflows.
 
 The datalayer-evals action runs Datalayer evals in CI and produces report artifacts.
 
-It uses the `datalayer-core` `DatalayerClient` and the `agent-runtimes`
+It uses the `agent-runtimes` `AgentClient` and the `agent-runtimes`
 eval-report helpers directly rather than shelling out to the CLI, so the generated
 reports contain the full structured failure diagnostics (per-run failure causes,
 stages, types and detail excerpts). Failures are also aggregated into the GitHub
@@ -21,7 +21,7 @@ It supports two execution modes:
 - Primary report mode (single evalset).
 - Comparison mode (primary + secondary evalsets) with a generated summary markdown.
 
-Real run execution is runner-first and uses `agent_runtimes.evals.saas.execute_evalset_spec`
+Real run execution is runner-first and uses `agent_runtimes.evals.remote.execute_evalset_spec`
 with one runtime per agentspec id in `mode=execute-runs`.
 
 Evalsets can be provided as IDs, or created on the fly from spec files.

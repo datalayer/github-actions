@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Run eval reports from GitHub Actions via the agent-runtimes API.
 
-This action talks to the Datalayer platform through the ``datalayer-core``
-client (``DatalayerClient``) and the ``agent-runtimes`` eval-report helpers
+This action talks to the Datalayer platform through the ``agent-runtimes``
+client (``AgentClient``) and the ``agent-runtimes`` eval-report helpers
 directly (no CLI subprocess), so the generated reports include the full
 structured failure diagnostics that the report engine renders (per-run failure
 causes, stages, types and detail excerpts). The action also aggregates those
@@ -20,8 +20,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from agent_runtimes.client import DatalayerClient
-from agent_runtimes.evals.saas import (
+from agent_runtimes.client import AgentClient
+from agent_runtimes.evals.remote import (
     average_latest_pass_rate,
     build_eval_report,
     collect_report_failures,
@@ -81,7 +81,7 @@ def append_step_summary(text: str) -> None:
 
 
 def _resolve_evalset_id(
-    client: DatalayerClient,
+    client: AgentClient,
     *,
     explicit_evalset_id: str,
     spec_file: str,
@@ -140,7 +140,7 @@ def _partial_report_reason(report: dict[str, Any]) -> str:
 
 
 def _generate_report(
-    client: DatalayerClient,
+    client: AgentClient,
     *,
     evalset_id: str,
     account_uid: str,
@@ -406,7 +406,7 @@ def _run_execute_runs_mode() -> int:
 
 def _execute_eval_runs(
     *,
-    client: DatalayerClient,
+    client: AgentClient,
     evalset_spec_file: str,
     agent_spec_ids: list[str],
     run_limit_raw: str,
