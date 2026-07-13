@@ -60,7 +60,7 @@ they never appear in workflow files or logs:
 | Secret | Maps to input | Required | Purpose |
 | :-- | :-- | :-- | :-- |
 | `DATALAYER_API_KEY` | `api-key` | ✅ Required | Authenticates every call the action makes to Datalayer. |
-| `DATALAYER_BILLABLE_ACCOUNT_UID` | `billable-account-uid` | Optional | Billable account context used for eval operations. |
+| `DATALAYER_BILLABLE_PRINCIPAL_UID` | `billable-principal-uid` | Optional | Billable principal context used for eval operations. |
 
 If the selected agentspec model provider needs credentials, define those as
 GitHub secrets too and expose them as environment variables on the action step.
@@ -84,15 +84,15 @@ Reference them in the consumer workflow:
 		AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
 	with:
 		api-key: ${{ secrets.DATALAYER_API_KEY }}
-		billable-account-uid: ${{ secrets.DATALAYER_BILLABLE_ACCOUNT_UID }}
+		billable-principal-uid: ${{ secrets.DATALAYER_BILLABLE_PRINCIPAL_UID }}
 		evalset-id: 01KXXXXXXXXXXXX
 ```
 
-To make the billable account optional at dispatch time while still defaulting to
+To make the billable principal optional at dispatch time while still defaulting to
 the secret, use the `||` fallback:
 
 ```yaml
-  billable-account-uid: ${{ inputs.billable_account_uid || secrets.DATALAYER_BILLABLE_ACCOUNT_UID }}
+  billable-principal-uid: ${{ inputs.billable_principal_uid || secrets.DATALAYER_BILLABLE_PRINCIPAL_UID }}
 ```
 
 ### Report Upload
@@ -110,10 +110,10 @@ any timestamped/secondary/comparison files) as a build artifact in a final step
 - secondary-evalset-spec-file: optional, path to secondary evalset spec JSON
 - api-key: required, Datalayer API key
 - ai-agents-url: optional, override API URL
-- billable-account-uid: optional, billable account UID context for eval operations
+- billable-principal-uid: optional, billable principal UID context for eval operations
 
-When `billable-account-uid` is omitted (or empty), the action does not force a
-billing override and calls run in the default account context for the API key.
+When `billable-principal-uid` is omitted (or empty), the action does not force a
+billing override and calls run in the default principal context for the API key.
 - run-limit: optional, default 50
 - output-markdown: optional, default evals-report.md
 - secondary-output-markdown: optional, output file for secondary report
@@ -175,7 +175,7 @@ with:
 	agentspec-ids: example-evals,example-evals-nocodemode
 	agent-environment-name: ai-agents-env
 	execution-target: cloud
-	billable-account-uid: ${{ secrets.DATALAYER_BILLABLE_ACCOUNT_UID }}
+	billable-principal-uid: ${{ secrets.DATALAYER_BILLABLE_PRINCIPAL_UID }}
 	output-markdown: artifacts/evals-report.md
 	export-csv: "true"
 ```

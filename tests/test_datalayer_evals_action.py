@@ -119,7 +119,7 @@ def test_parse_csv_dedupes_and_strips(action_module):
     assert action_module.parse_csv("a, b,a,, c ") == ["a", "b", "c"]
 
 
-def test_resolve_evalset_id_from_spec_uses_optional_account_uid(action_module, tmp_path):
+def test_resolve_evalset_id_from_spec_uses_optional_billable_principal_uid(action_module, tmp_path):
     spec_file = tmp_path / "evalset.json"
     spec_file.write_text(
         json.dumps(
@@ -143,11 +143,11 @@ def test_resolve_evalset_id_from_spec_uses_optional_account_uid(action_module, t
         FakeClient(),
         explicit_evalset_id="",
         spec_file=str(spec_file),
-        account_uid="",
+        billable_principal_uid="",
     )
 
     assert evalset_id == "evalset-123"
-    assert captured["account_uid"] is None
+    assert captured["billable_principal_uid"] is None
 
 
 def test_report_is_partial_detects_missing_experiments_or_runs(action_module):
