@@ -87,6 +87,7 @@ def _resolve_evalset_id(
     explicit_evalset_id: str,
     spec_file: str,
     billable_principal_uid: str,
+    account_uid: str,
 ) -> str:
     """Return an evalset id, creating it from a spec file when needed."""
     evalset_id = explicit_evalset_id.strip()
@@ -103,6 +104,7 @@ def _resolve_evalset_id(
     payload = client.evals_create_eval_from_spec(
         spec=spec,
         billable_principal_uid=billable_principal_uid or None,
+        account_uid=account_uid or None,
     )
     created_id = str(((payload.get("evalset") or {}).get("id") or "")).strip()
     if not created_id:
@@ -145,6 +147,7 @@ def _generate_report(
     *,
     evalset_id: str,
     billable_principal_uid: str,
+    account_uid: str,
     run_limit: int,
     output_markdown: str,
     export_csv: bool,
@@ -155,6 +158,7 @@ def _generate_report(
         evalset_id,
         run_limit=run_limit,
         billable_principal_uid=billable_principal_uid or None,
+        account_uid=account_uid or None,
     )
 
     report_path = Path(output_markdown)
@@ -327,6 +331,7 @@ def _run_execute_runs_mode() -> int:
     evalset_spec_file = os.getenv("INPUT_EVALSET_SPEC_FILE", "").strip()
     ai_agents_url = os.getenv("INPUT_AI_AGENTS_URL", "").strip()
     billable_principal_uid = os.getenv("INPUT_BILLABLE_PRINCIPAL_UID", "").strip()
+    account_uid = os.getenv("INPUT_ACCOUNT_UID", "").strip()
     run_limit_raw = os.getenv("INPUT_RUN_LIMIT", "50").strip() or "50"
     iam_url = os.getenv("INPUT_IAM_URL", "").strip()
     runtimes_url = os.getenv("INPUT_RUNTIMES_URL", "").strip()
@@ -376,6 +381,7 @@ def _run_execute_runs_mode() -> int:
             local_agent_base_url=local_agent_base_url,
             local_agent_name=local_agent_name,
             billable_principal_uid=billable_principal_uid,
+            account_uid=account_uid,
             request_timeout_seconds=request_timeout_seconds,
         )
     except Exception as exc:
@@ -418,6 +424,7 @@ def _execute_eval_runs(
     local_agent_base_url: str,
     local_agent_name: str,
     billable_principal_uid: str,
+    account_uid: str,
     request_timeout_seconds: int,
 ) -> str:
     try:
@@ -436,6 +443,7 @@ def _execute_eval_runs(
         "local_agent_name": local_agent_name or None,
         "auto_start_local_agent_runtime": bool(auto_start_local_agent_runtime),
         "billable_principal_uid": billable_principal_uid or None,
+        "account_uid": account_uid or None,
         "launch_source": "datalayer-github-actions",
         "execution_target": execution_target,
         "request_timeout_seconds": request_timeout_seconds,
@@ -479,6 +487,7 @@ def main() -> int:
     api_key = os.getenv("INPUT_API_KEY", "").strip()
     ai_agents_url = os.getenv("INPUT_AI_AGENTS_URL", "").strip()
     billable_principal_uid = os.getenv("INPUT_BILLABLE_PRINCIPAL_UID", "").strip()
+    account_uid = os.getenv("INPUT_ACCOUNT_UID", "").strip()
     run_limit_raw = os.getenv("INPUT_RUN_LIMIT", "50").strip() or "50"
     output_markdown = os.getenv("INPUT_OUTPUT_MARKDOWN", "evals-report.md").strip() or "evals-report.md"
     secondary_output_markdown = os.getenv("INPUT_SECONDARY_OUTPUT_MARKDOWN", "").strip()
@@ -511,6 +520,7 @@ def main() -> int:
             explicit_evalset_id=evalset_id,
             spec_file=evalset_spec_file,
             billable_principal_uid=billable_principal_uid,
+            account_uid=account_uid,
         )
     except Exception as exc:
         message = f"Failed to resolve primary evalset: {exc}"
@@ -527,6 +537,7 @@ def main() -> int:
                 explicit_evalset_id=secondary_evalset_id,
                 spec_file=secondary_evalset_spec_file,
                 billable_principal_uid=billable_principal_uid,
+                account_uid=account_uid,
             )
         except Exception as exc:
             message = f"Failed to resolve secondary evalset: {exc}"
@@ -540,6 +551,7 @@ def main() -> int:
             client,
             evalset_id=resolved_evalset_id,
             billable_principal_uid=billable_principal_uid,
+            account_uid=account_uid,
             run_limit=run_limit,
             output_markdown=output_markdown,
             export_csv=export_csv,
@@ -572,6 +584,7 @@ def main() -> int:
                 client,
                 evalset_id=resolved_secondary_evalset_id,
                 billable_principal_uid=billable_principal_uid,
+                account_uid=account_uid,
                 run_limit=run_limit,
                 output_markdown=secondary_output_markdown,
                 export_csv=export_csv,
