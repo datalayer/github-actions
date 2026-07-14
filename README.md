@@ -60,8 +60,8 @@ they never appear in workflow files or logs:
 | Secret | Maps to input | Required | Purpose |
 | :-- | :-- | :-- | :-- |
 | `DATALAYER_API_KEY` | `api-key` | ✅ Required | Authenticates every call the action makes to Datalayer. |
-| `DATALAYER_ACCOUNT_UID` | `account-uid` | Optional | Account context used for eval operations (primary optional context). |
-| `DATALAYER_BILLING_ENTITY_UID` | `billing-entity-uid` | Optional | Billing Entity context used for eval operations. |
+| `DATALAYER_ACCOUNT_UID` | `account-uid` | Optional | Account context used for eval operations (user, organization, or team UID). Used only when `billing-entity-uid` is empty. |
+| `DATALAYER_BILLING_ENTITY_UID` | `billing-entity-uid` | Optional | Billing Entity context used for eval operations (user, organization, or team UID). Teams carry their own credits, so a team UID scopes ownership and credit consumption to that team. Takes precedence over `account-uid`. |
 
 If the selected agentspec model provider needs credentials, define those as
 GitHub secrets too and expose them as environment variables on the action step.
@@ -113,8 +113,8 @@ any timestamped/secondary/comparison files) as a build artifact in a final step
 - secondary-evalset-spec-file: optional, path to secondary evalset spec JSON
 - api-key: required, Datalayer API key
 - ai-agents-url: optional, override API URL
-- account-uid: optional, account UID context for eval operations
-- billing-entity-uid: optional, billing entity UID context for eval operations
+- account-uid: optional, account UID context for eval operations (used only when billing-entity-uid is empty)
+- billing-entity-uid: optional, billing entity UID context for eval operations (user, organization, or team UID; a team UID scopes ownership and credits to that team)
 
 When `account-uid` is omitted (or empty), calls run in the default account
 context for the API key. When `billing-entity-uid` is omitted (or empty),

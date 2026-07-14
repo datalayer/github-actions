@@ -36,11 +36,17 @@ inputs:
     required: false
     default: ""
   billing-entity-uid:
-    description: Optional billing entity UID context used for eval operations.
+    description: >-
+      Optional billing entity UID context used for eval operations. May be a
+      user, organization, or team UID. Teams carry their own credits, so a team
+      UID scopes evalset ownership and credit consumption to that team. Takes
+      precedence over account-uid.
     required: false
     default: ""
   account-uid:
-    description: Optional account UID context used for eval operations.
+    description: >-
+      Optional account UID context used for eval operations. May be a user,
+      organization, or team UID. Used only when billing-entity-uid is empty.
     required: false
     default: ""
   run-environment:
@@ -194,7 +200,7 @@ runs:
       shell: bash
       run: |
         python -m pip install --upgrade pip
-        python -m pip install "agent-runtimes>=1.0.14"
+        python -m pip install "agent-runtimes>=1.0.15"
 
     - name: Run Datalayer Evals Report
       id: run

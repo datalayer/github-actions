@@ -144,10 +144,12 @@ def test_resolve_evalset_id_from_spec_uses_optional_billing_entity_uid(action_mo
         explicit_evalset_id="",
         spec_file=str(spec_file),
         billing_entity_uid="",
+        account_uid="",
     )
 
     assert evalset_id == "evalset-123"
     assert captured["billing_entity_uid"] is None
+    assert captured["account_uid"] is None
 
 
 def test_report_is_partial_detects_missing_experiments_or_runs(action_module):
