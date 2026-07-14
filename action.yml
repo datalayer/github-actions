@@ -207,7 +207,7 @@ runs:
         INPUT_SECONDARY_EVALSET_SPEC_FILE: ${{ inputs.secondary-evalset-spec-file }}
         INPUT_API_KEY: ${{ inputs.api-key }}
         INPUT_AI_AGENTS_URL: ${{ inputs.ai-agents-url }}
-        INPUT_BIILING_PRINCIPAL_UID: ${{ inputs.billing-entity-uid }}
+        INPUT_BILLING_ENTITY_UID: ${{ inputs.billing-entity-uid }}
         INPUT_ACCOUNT_UID: ${{ inputs.account-uid }}
         INPUT_RUN_ENVIRONMENT: ${{ inputs.run-environment }}
         INPUT_REQUEST_TIMEOUT_SECONDS: ${{ inputs.request-timeout-seconds }}

@@ -61,7 +61,7 @@ they never appear in workflow files or logs:
 | :-- | :-- | :-- | :-- |
 | `DATALAYER_API_KEY` | `api-key` | ✅ Required | Authenticates every call the action makes to Datalayer. |
 | `DATALAYER_ACCOUNT_UID` | `account-uid` | Optional | Account context used for eval operations (primary optional context). |
-| `DATALAYER_BIILING_PRINCIPAL_UID` | `billing-entity-uid` | Optional | Billing Entity context used for eval operations. |
+| `DATALAYER_BILLING_ENTITY_UID` | `billing-entity-uid` | Optional | Billing Entity context used for eval operations. |
 
 If the selected agentspec model provider needs credentials, define those as
 GitHub secrets too and expose them as environment variables on the action step.
@@ -86,7 +86,7 @@ Reference them in the consumer workflow:
 	with:
 		api-key: ${{ secrets.DATALAYER_API_KEY }}
 			account-uid: ${{ secrets.DATALAYER_ACCOUNT_UID }}
-		billing-entity-uid: ${{ secrets.DATALAYER_BIILING_PRINCIPAL_UID }}
+		billing-entity-uid: ${{ secrets.DATALAYER_BILLING_ENTITY_UID }}
 		evalset-id: 01KXXXXXXXXXXXX
 ```
 
@@ -95,7 +95,7 @@ Reference them in the consumer workflow:
 
 ```yaml
 	  account-uid: ${{ inputs.account_uid || secrets.DATALAYER_ACCOUNT_UID }}
-  billing-entity-uid: ${{ inputs.billing_entity_uid || secrets.DATALAYER_BIILING_PRINCIPAL_UID }}
+  billing-entity-uid: ${{ inputs.billing_entity_uid || secrets.DATALAYER_BILLING_ENTITY_UID }}
 ```
 
 ### Report Upload
@@ -177,7 +177,7 @@ with:
 	evalset-id: 01KXXXXXXXXXXXX
 	api-key: ${{ secrets.DATALAYER_API_KEY }}
 	account-uid: ${{ secrets.DATALAYER_ACCOUNT_UID }}
-	billing-entity-uid: ${{ secrets.DATALAYER_BIILING_PRINCIPAL_UID }}
+	billing-entity-uid: ${{ secrets.DATALAYER_BILLING_ENTITY_UID }}
 	run-limit: "50"
 	output-markdown: artifacts/evals-report.md
 	export-csv: "true"
@@ -196,7 +196,7 @@ with:
 	agentspec-ids: example-evals,example-evals-nocodemode
 	agent-environment-name: ai-agents-env
 	execution-target: cloud
-	billing-entity-uid: ${{ secrets.DATALAYER_BIILING_PRINCIPAL_UID }}
+	billing-entity-uid: ${{ secrets.DATALAYER_BILLING_ENTITY_UID }}
 	output-markdown: artifacts/evals-report.md
 	export-csv: "true"
 ```

@@ -330,7 +330,7 @@ def _run_execute_runs_mode() -> int:
     api_key = os.getenv("INPUT_API_KEY", "").strip()
     evalset_spec_file = os.getenv("INPUT_EVALSET_SPEC_FILE", "").strip()
     ai_agents_url = os.getenv("INPUT_AI_AGENTS_URL", "").strip()
-    billing_entity_uid = os.getenv("INPUT_BIILING_PRINCIPAL_UID", "").strip()
+    billing_entity_uid = os.getenv("INPUT_BILLING_ENTITY_UID", "").strip()
     account_uid = os.getenv("INPUT_ACCOUNT_UID", "").strip()
     run_limit_raw = os.getenv("INPUT_RUN_LIMIT", "50").strip() or "50"
     iam_url = os.getenv("INPUT_IAM_URL", "").strip()
@@ -486,7 +486,7 @@ def main() -> int:
     secondary_evalset_spec_file = os.getenv("INPUT_SECONDARY_EVALSET_SPEC_FILE", "").strip()
     api_key = os.getenv("INPUT_API_KEY", "").strip()
     ai_agents_url = os.getenv("INPUT_AI_AGENTS_URL", "").strip()
-    billing_entity_uid = os.getenv("INPUT_BIILING_PRINCIPAL_UID", "").strip()
+    billing_entity_uid = os.getenv("INPUT_BILLING_ENTITY_UID", "").strip()
     account_uid = os.getenv("INPUT_ACCOUNT_UID", "").strip()
     run_limit_raw = os.getenv("INPUT_RUN_LIMIT", "50").strip() or "50"
     output_markdown = os.getenv("INPUT_OUTPUT_MARKDOWN", "evals-report.md").strip() or "evals-report.md"
