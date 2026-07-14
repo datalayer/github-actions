@@ -35,8 +35,8 @@ inputs:
     description: Optional AI Agents base URL override.
     required: false
     default: ""
-  billable-principal-uid:
-    description: Optional billable principal UID context used for eval operations.
+  billing-entity-uid:
+    description: Optional billing entity UID context used for eval operations.
     required: false
     default: ""
   account-uid:
@@ -207,7 +207,7 @@ runs:
         INPUT_SECONDARY_EVALSET_SPEC_FILE: ${{ inputs.secondary-evalset-spec-file }}
         INPUT_API_KEY: ${{ inputs.api-key }}
         INPUT_AI_AGENTS_URL: ${{ inputs.ai-agents-url }}
-        INPUT_BILLABLE_PRINCIPAL_UID: ${{ inputs.billable-principal-uid }}
+        INPUT_BIILING_PRINCIPAL_UID: ${{ inputs.billing-entity-uid }}
         INPUT_ACCOUNT_UID: ${{ inputs.account-uid }}
         INPUT_RUN_ENVIRONMENT: ${{ inputs.run-environment }}
         INPUT_REQUEST_TIMEOUT_SECONDS: ${{ inputs.request-timeout-seconds }}

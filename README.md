@@ -61,7 +61,7 @@ they never appear in workflow files or logs:
 | :-- | :-- | :-- | :-- |
 | `DATALAYER_API_KEY` | `api-key` | ✅ Required | Authenticates every call the action makes to Datalayer. |
 | `DATALAYER_ACCOUNT_UID` | `account-uid` | Optional | Account context used for eval operations (primary optional context). |
-| `DATALAYER_BILLABLE_PRINCIPAL_UID` | `billable-principal-uid` | Optional | Billable principal context used for eval operations. |
+| `DATALAYER_BIILING_PRINCIPAL_UID` | `billing-entity-uid` | Optional | Billing Entity context used for eval operations. |
 
 If the selected agentspec model provider needs credentials, define those as
 GitHub secrets too and expose them as environment variables on the action step.
@@ -86,16 +86,16 @@ Reference them in the consumer workflow:
 	with:
 		api-key: ${{ secrets.DATALAYER_API_KEY }}
 			account-uid: ${{ secrets.DATALAYER_ACCOUNT_UID }}
-		billable-principal-uid: ${{ secrets.DATALAYER_BILLABLE_PRINCIPAL_UID }}
+		billing-entity-uid: ${{ secrets.DATALAYER_BIILING_PRINCIPAL_UID }}
 		evalset-id: 01KXXXXXXXXXXXX
 ```
 
-	To make account and billable contexts optional at dispatch time while still
+	To make account and billing contexts optional at dispatch time while still
 	defaulting to secrets, use the `||` fallback:
 
 ```yaml
 	  account-uid: ${{ inputs.account_uid || secrets.DATALAYER_ACCOUNT_UID }}
-  billable-principal-uid: ${{ inputs.billable_principal_uid || secrets.DATALAYER_BILLABLE_PRINCIPAL_UID }}
+  billing-entity-uid: ${{ inputs.billing_entity_uid || secrets.DATALAYER_BIILING_PRINCIPAL_UID }}
 ```
 
 ### Report Upload
@@ -114,10 +114,10 @@ any timestamped/secondary/comparison files) as a build artifact in a final step
 - api-key: required, Datalayer API key
 - ai-agents-url: optional, override API URL
 - account-uid: optional, account UID context for eval operations
-- billable-principal-uid: optional, billable principal UID context for eval operations
+- billing-entity-uid: optional, billing entity UID context for eval operations
 
 When `account-uid` is omitted (or empty), calls run in the default account
-context for the API key. When `billable-principal-uid` is omitted (or empty),
+context for the API key. When `billing-entity-uid` is omitted (or empty),
 the action does not force a billing override.
 - run-limit: optional, default 50
 - output-markdown: optional, default evals-report.md
@@ -169,7 +169,7 @@ with:
 	export-csv: "true"
 ```
 
-Example workflow step (single evalset, account + billable context):
+Example workflow step (single evalset, account + billing context):
 
 ```yaml
 uses: datalayer/github-actions@v1
@@ -177,7 +177,7 @@ with:
 	evalset-id: 01KXXXXXXXXXXXX
 	api-key: ${{ secrets.DATALAYER_API_KEY }}
 	account-uid: ${{ secrets.DATALAYER_ACCOUNT_UID }}
-	billable-principal-uid: ${{ secrets.DATALAYER_BILLABLE_PRINCIPAL_UID }}
+	billing-entity-uid: ${{ secrets.DATALAYER_BIILING_PRINCIPAL_UID }}
 	run-limit: "50"
 	output-markdown: artifacts/evals-report.md
 	export-csv: "true"
@@ -196,7 +196,7 @@ with:
 	agentspec-ids: example-evals,example-evals-nocodemode
 	agent-environment-name: ai-agents-env
 	execution-target: cloud
-	billable-principal-uid: ${{ secrets.DATALAYER_BILLABLE_PRINCIPAL_UID }}
+	billing-entity-uid: ${{ secrets.DATALAYER_BIILING_PRINCIPAL_UID }}
 	output-markdown: artifacts/evals-report.md
 	export-csv: "true"
 ```
