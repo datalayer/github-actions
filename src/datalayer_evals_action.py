@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import os
-import inspect
 import sys
 from pathlib import Path
 from typing import Any
@@ -440,7 +439,6 @@ def _execute_eval_runs(
         "run_environment": run_environment,
         "environment_name": agent_environment_name,
         "local_agent_base_url": local_agent_base_url or None,
-        "local_agent_name": local_agent_name or None,
         "auto_start_local_agent_runtime": bool(auto_start_local_agent_runtime),
         "billing_entity_uid": billing_entity_uid or None,
         "account_uid": account_uid or None,
@@ -450,17 +448,13 @@ def _execute_eval_runs(
         "log": print,
     }
 
-    signature = inspect.signature(execute_evalset_spec)
-    accepts_var_kwargs = any(
-        param.kind == inspect.Parameter.VAR_KEYWORD
-        for param in signature.parameters.values()
-    )
-    if not accepts_var_kwargs:
-        exec_kwargs = {
-            key: value
-            for key, value in exec_kwargs.items()
-            if key in signature.parameters
-        }
+    # The runner names the local agent `agent_name`. A filter used to drop
+    # any keyword the installed runner did not know, which is how this input
+    # went unused for months without a word; the action now pins a runner
+    # that takes every keyword it sends, and a mismatch fails loudly.
+    if local_agent_name:
+        exec_kwargs["agent_name"] = local_agent_name
+    exec_kwargs = {key: value for key, value in exec_kwargs.items() if value is not None}
 
     execution = execute_evalset_spec(client, **exec_kwargs)
     executed_evalset_id = str(execution.get("evalset_id") or "").strip()
@@ -501,7 +495,7 @@ def main() -> int:
         return 2
 
     try:
-        run_limit = max(2, min(200, int(run_limit_raw)))
+        run_limit = max(1, min(200, int(run_limit_raw)))
     except ValueError:
         run_limit = 50
 

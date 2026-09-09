@@ -249,3 +249,128 @@ def test_main_execute_runs_mode_forwards_request_timeout_seconds(
 
     assert exit_code == 0
     assert captured["request_timeout_seconds"] == 45
+
+
+# --- The contract the action keeps (BENCHMARK.md, B0-05) -------------------
+
+
+def _manifest_outputs() -> list[str]:
+    """The output names `action.yml` declares, as the code spells them."""
+    text = (Path(__file__).resolve().parents[1] / "action.yml").read_text(encoding="utf-8")
+    block = text.split("\noutputs:\n", 1)[1].split("\nruns:\n", 1)[0]
+    names = []
+    for line in block.splitlines():
+        if line.startswith("  ") and not line.startswith("    ") and line.rstrip().endswith(":"):
+            names.append(line.strip()[:-1].replace("-", "_"))
+    return names
+
+
+ACTION_OUTPUTS = [
+    "prepared_spec_path",
+    "spec_path",
+    "report_file",
+    "evalset_id",
+    "executed_evalset_id",
+    "csv_file",
+    "log_file",
+    "timestamped_report_file",
+    "timestamped_csv_file",
+    "secondary_report_file",
+    "secondary_csv_file",
+    "secondary_log_file",
+    "secondary_timestamped_report_file",
+    "secondary_timestamped_csv_file",
+    "comparison_summary_file",
+    "failed_run_count",
+    "primary_failed_run_count",
+    "secondary_failed_run_count",
+]
+
+
+def _one_experiment_report() -> dict:
+    """A report with something in it; an empty one fails the action on purpose."""
+    return {
+        "generated_at": "2026-01-01T00:00:00Z",
+        "evalset_id": "evalset-1",
+        "experiments": [{"id": "experiment-1", "runs": [{"id": "run-1", "status": "completed"}]}],
+    }
+
+
+def test_the_manifest_declares_exactly_these_outputs():
+    assert _manifest_outputs() == ACTION_OUTPUTS
+
+
+def test_run_report_writes_its_outputs(action_module, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    outputs = tmp_path / "outputs.txt"
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(outputs))
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setenv("INPUT_MODE", "run-report")
+    monkeypatch.setenv("INPUT_API_KEY", "key")
+    monkeypatch.setenv("INPUT_EVALSET_ID", "evalset-1")
+    monkeypatch.setenv("INPUT_RUN_LIMIT", "1")
+    monkeypatch.setattr(action_module, "build_eval_report", lambda *a, **k: _one_experiment_report())
+
+    assert action_module.main() == 0
+
+    written = dict(line.split("=", 1) for line in outputs.read_text(encoding="utf-8").splitlines())
+    # Every run-report output, and nothing the other modes own.
+    assert set(written) == set(ACTION_OUTPUTS) - {"prepared_spec_path", "spec_path"}
+    assert written["evalset_id"] == "evalset-1"
+    assert written["failed_run_count"] == "0"
+    assert Path(written["report_file"]).read_text(encoding="utf-8").strip() == "# report"
+    assert "Datalayer Evals Report" in summary.read_text(encoding="utf-8")
+
+
+def test_a_single_run_is_a_valid_limit(action_module, monkeypatch, tmp_path):
+    # The CLI and the action used to disagree: one refused fewer than two
+    # runs, the other accepted one. Both accept one now.
+    seen = {}
+
+    def build(client, evalset_id, run_limit=None, **kwargs):
+        seen["run_limit"] = run_limit
+        return _one_experiment_report()
+
+    monkeypatch.setattr(action_module, "build_eval_report", build)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("INPUT_MODE", "run-report")
+    monkeypatch.setenv("INPUT_API_KEY", "key")
+    monkeypatch.setenv("INPUT_EVALSET_ID", "evalset-1")
+    monkeypatch.setenv("INPUT_RUN_LIMIT", "1")
+    assert action_module.main() == 0
+    assert seen["run_limit"] == 1
+
+
+def test_execute_runs_names_the_local_agent_the_way_the_runner_does(action_module, monkeypatch):
+    captured = {}
+
+    def fake_execute(client, **kwargs):
+        captured.update(kwargs)
+        return {"evalset_id": "evalset-executed"}
+
+    monkeypatch.setattr(action_module, "execute_evalset_spec", fake_execute)
+    monkeypatch.setattr(action_module, "load_evalset_spec", lambda _path: {"name": "spec", "cases": []})
+
+    executed = action_module._execute_eval_runs(
+        client=object(),
+        evalset_spec_file="spec.json",
+        agent_spec_ids=["agent-a"],
+        run_limit_raw="3",
+        run_environment="sdk",
+        agent_environment_name="ai-agents-env",
+        execution_target="local",
+        auto_start_local_agent_runtime=True,
+        local_agent_base_url="http://127.0.0.1:8765",
+        local_agent_name="my-agent",
+        billing_entity_uid="",
+        account_uid="",
+        request_timeout_seconds=180,
+    )
+    assert executed == "evalset-executed"
+    assert captured["agent_name"] == "my-agent"
+    assert "local_agent_name" not in captured
+    # Unset inputs are left to the runner's defaults rather than sent as None.
+    assert "billing_entity_uid" not in captured
+    assert captured["run_limit"] == 3
+    assert captured["execution_target"] == "local"
