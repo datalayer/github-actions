@@ -62,7 +62,7 @@ def action_module(monkeypatch):
 
     agents_mod = types.ModuleType("datalayer_core.agents")
     agents_mod.create_cloud_agent_runtime = lambda *args, **kwargs: types.SimpleNamespace(
-        pod_name="pod-default", ingress="https://ingress"
+        runtime_name="pod-default", ingress="https://ingress"
     )
     agents_mod.teardown_agent_execution_resources = lambda *_args, **_kwargs: {
         "cloud_runtime_terminated": True
