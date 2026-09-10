@@ -16,15 +16,17 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from agent_runtimes.client import AgentClient
 from agent_runtimes.evals.remote import (
     average_latest_pass_rate,
     build_eval_report,
     collect_report_failures,
+    benchmark_url,
     execute_evalset_spec,
     load_evalset_spec,
     make_client,
@@ -62,6 +64,83 @@ def parse_request_timeout_seconds(raw: str, default: int = 180) -> int:
     except ValueError:
         return default
     return max(1, value)
+
+
+def git_context(environ: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Where this launch comes from, read from what Actions sets (B6-02).
+
+    The commit, the ref, the repository, the action run, and the pull
+    request when there is one — from the event payload when it names it,
+    from a `refs/pull/N/...` ref otherwise. Empty outside Actions, and the
+    runner drops empty values, so a launch made by hand carries nothing.
+    """
+    env = environ if environ is not None else os.environ
+    ref = str(env.get("GITHUB_REF") or "").strip()
+    pr_number = ""
+    event_path = str(env.get("GITHUB_EVENT_PATH") or "").strip()
+    if event_path and Path(event_path).is_file():
+        try:
+            event = json.loads(Path(event_path).read_text(encoding="utf-8"))
+            number = (event.get("pull_request") or {}).get("number") if isinstance(event, dict) else None
+            if number is not None:
+                pr_number = str(number)
+        except (OSError, ValueError):
+            pr_number = ""
+    if not pr_number:
+        match = re.match(r"^refs/pull/(\d+)/", ref)
+        if match:
+            pr_number = match.group(1)
+    server = str(env.get("GITHUB_SERVER_URL") or "https://github.com").rstrip("/")
+    repository = str(env.get("GITHUB_REPOSITORY") or "").strip()
+    run_id = str(env.get("GITHUB_RUN_ID") or "").strip()
+    return {
+        "sha": str(env.get("GITHUB_SHA") or "").strip(),
+        "ref": ref,
+        "repository": repository,
+        "run_id": run_id,
+        "pr_number": pr_number,
+        "url": f"{server}/{repository}/actions/runs/{run_id}" if repository and run_id else "",
+    }
+
+
+def parse_gate(raw: str, name: str) -> float | None:
+    """A gate input: a fraction in [0, 1], or nothing. Anything else is refused."""
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    try:
+        value = float(text)
+    except ValueError as error:
+        raise ValueError(f"{name} must be a fraction between 0 and 1, got {text!r}") from error
+    if not 0.0 <= value <= 1.0:
+        raise ValueError(f"{name} must be a fraction between 0 and 1, got {text!r}")
+    return value
+
+
+def quality_gate(
+    report: Mapping[str, Any], *, pass_rate_threshold: float | None, max_regression: float | None
+) -> tuple[str, list[str]]:
+    """The gates' verdict from the scores (B6-05): `passed`, `failed`, or
+    `skipped` when no gate is set; and the reasons, one per experiment that
+    failed one. An experiment with no scored run does not pass a gate — a
+    missing score is not a passing one."""
+    if pass_rate_threshold is None and max_regression is None:
+        return "skipped", []
+    reasons: list[str] = []
+    for experiment in report.get("experiments") or []:
+        if not isinstance(experiment, dict):
+            continue
+        name = str(experiment.get("name") or experiment.get("id") or "experiment")
+        latest = experiment.get("latest_pass_rate")
+        drift = experiment.get("drift_delta")
+        if pass_rate_threshold is not None:
+            if not isinstance(latest, (int, float)):
+                reasons.append(f"{name}: no scored run to hold to the pass-rate threshold")
+            elif float(latest) < pass_rate_threshold:
+                reasons.append(f"{name}: latest pass rate {float(latest):.1%} is below the threshold {pass_rate_threshold:.1%}")
+        if max_regression is not None and isinstance(drift, (int, float)) and float(drift) < -max_regression:
+            reasons.append(f"{name}: drift {float(drift):+.1%} exceeds the allowed regression of {max_regression:.1%}")
+    return ("failed" if reasons else "passed"), reasons
 
 
 def append_github_output(key: str, value: str) -> None:
@@ -346,6 +425,8 @@ def _run_execute_runs_mode() -> int:
     request_timeout_seconds = parse_request_timeout_seconds(
         os.getenv("INPUT_REQUEST_TIMEOUT_SECONDS", "180")
     )
+    concurrency_raw = os.getenv("INPUT_CONCURRENCY", "4").strip() or "4"
+    budget_raw = os.getenv("INPUT_BUDGET", "").strip()
 
     if not api_key:
         print("Missing required input: api-key", file=sys.stderr)
@@ -353,6 +434,18 @@ def _run_execute_runs_mode() -> int:
     if not evalset_spec_file:
         print("execute-runs requires evalset-spec-file", file=sys.stderr)
         return 2
+    try:
+        concurrency = max(1, int(concurrency_raw))
+    except ValueError:
+        print(f"execute-runs concurrency must be a whole number, got {concurrency_raw!r}", file=sys.stderr)
+        return 2
+    budget: float | None = None
+    if budget_raw:
+        try:
+            budget = float(budget_raw)
+        except ValueError:
+            print(f"execute-runs budget must be a number of credits, got {budget_raw!r}", file=sys.stderr)
+            return 2
     if not agent_spec_ids:
         print("execute-runs requires agentspec-ids", file=sys.stderr)
         return 2
@@ -368,7 +461,7 @@ def _run_execute_runs_mode() -> int:
     )
 
     try:
-        executed_evalset_id = _execute_eval_runs(
+        execution = _execute_eval_runs(
             client=client,
             evalset_spec_file=evalset_spec_file,
             agent_spec_ids=agent_spec_ids,
@@ -382,6 +475,8 @@ def _run_execute_runs_mode() -> int:
             billing_entity_uid=billing_entity_uid,
             account_uid=account_uid,
             request_timeout_seconds=request_timeout_seconds,
+            concurrency=concurrency,
+            budget=budget,
         )
     except Exception as exc:
         message = f"Failed to execute eval runs: {exc}"
@@ -390,13 +485,21 @@ def _run_execute_runs_mode() -> int:
         append_step_summary(f"- Error: `{message}`\n")
         return 1
 
+    executed_evalset_id = str(execution.get("evalset_id") or "")
+    live_report_url = str(execution.get("view_url") or benchmark_url(executed_evalset_id))
     append_github_output("executed_evalset_id", executed_evalset_id)
     append_github_output("evalset_id", executed_evalset_id)
+    append_github_output("live_report_url", live_report_url)
 
     append_step_summary("## Datalayer Evals Report\n\n")
+    # The first line is where to read it (B6-01).
+    append_step_summary(f"**Live report:** {live_report_url}\n\n")
     append_step_summary("- Mode: execute-runs\n")
     append_step_summary(f"- Lane: {run_environment}\n")
     append_step_summary(f"- Execution target: {execution_target}\n")
+    if execution_target == "cloud":
+        append_step_summary(f"- Concurrency: {concurrency}\n")
+        append_step_summary(f"- Budget: {'none' if budget is None else f'{budget:g} credits'}\n")
     if execution_target == "local":
         append_step_summary(
             f"- Local runtime endpoint: {local_agent_base_url or 'http://127.0.0.1:8765'}\n"
@@ -405,7 +508,11 @@ def _run_execute_runs_mode() -> int:
             "- Local runtime CLI: `agent-runtimes serve --port 8765 --find-free-port`\n"
         )
     append_step_summary(f"- Executed evalset id: {executed_evalset_id}\n")
-    append_step_summary(f"- Agentspec ids: {', '.join(agent_spec_ids)}\n\n")
+    append_step_summary(f"- Agentspec ids: {', '.join(agent_spec_ids)}\n")
+    launch_ids = [str(item) for item in (execution.get("launch_ids") or [])]
+    if launch_ids:
+        append_step_summary(f"- Launches: {', '.join(launch_ids)}\n")
+    append_step_summary("\n")
 
     return 0
 
@@ -425,7 +532,11 @@ def _execute_eval_runs(
     billing_entity_uid: str,
     account_uid: str,
     request_timeout_seconds: int,
-) -> str:
+    concurrency: int = 4,
+    budget: float | None = None,
+) -> dict[str, Any]:
+    """The runner's answer, whole: the evalset it made, the launches it
+    submitted and where to read them (`view_url`, B6-01)."""
     try:
         execution_run_limit = max(1, int(run_limit_raw))
     except ValueError:
@@ -445,6 +556,10 @@ def _execute_eval_runs(
         "launch_source": "datalayer-github-actions",
         "execution_target": execution_target,
         "request_timeout_seconds": request_timeout_seconds,
+        # A cloud execution is a launch the platform runs (BENCHMARK.md,
+        # B2-15): how many sandboxes per experiment, and what it may spend.
+        "concurrency": concurrency,
+        "credits_limit": budget,
         "log": print,
     }
 
@@ -456,11 +571,14 @@ def _execute_eval_runs(
         exec_kwargs["agent_name"] = local_agent_name
     exec_kwargs = {key: value for key, value in exec_kwargs.items() if value is not None}
 
+    # Where the launch comes from rides on it (B6-02); empty outside Actions.
+    exec_kwargs["git"] = git_context()
+
     execution = execute_evalset_spec(client, **exec_kwargs)
     executed_evalset_id = str(execution.get("evalset_id") or "").strip()
     if not executed_evalset_id:
         raise RuntimeError("Runner did not return an evalset id.")
-    return executed_evalset_id
+    return dict(execution)
 
 
 def main() -> int:
@@ -492,6 +610,12 @@ def main() -> int:
 
     if not api_key:
         print("Missing required input: api-key", file=sys.stderr)
+        return 2
+    try:
+        pass_rate_threshold = parse_gate(os.getenv("INPUT_PASS_RATE_THRESHOLD", ""), "pass-rate-threshold")
+        max_regression = parse_gate(os.getenv("INPUT_MAX_REGRESSION", ""), "max-regression")
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
         return 2
 
     try:
@@ -612,6 +736,13 @@ def main() -> int:
     )
     total_failed = int(primary_failures["failed_run_count"]) + int(secondary_failures["failed_run_count"])
 
+    live_report_url = benchmark_url(resolved_evalset_id)
+    gate_status, gate_reasons = quality_gate(
+        primary_report, pass_rate_threshold=pass_rate_threshold, max_regression=max_regression
+    )
+
+    append_github_output("live_report_url", live_report_url)
+    append_github_output("gate_status", gate_status)
     append_github_output("report_file", primary_outputs["report_file"])
     append_github_output("csv_file", primary_outputs["csv_file"])
     append_github_output("log_file", primary_outputs["log_file"])
@@ -631,6 +762,11 @@ def main() -> int:
 
     if primary_outputs["report_file"]:
         append_step_summary("## Datalayer Evals Report\n\n")
+        append_step_summary(f"**Live report:** {live_report_url}\n\n")
+        if gate_status != "skipped":
+            append_step_summary(f"- Quality gate: **{gate_status}**\n")
+            for reason in gate_reasons:
+                append_step_summary(f"  - {reason}\n")
         append_step_summary(f"- Primary evalset: {resolved_evalset_id}\n")
         if executed_evalset_id:
             append_step_summary(f"- Executed evalset (real runs): {executed_evalset_id}\n")
@@ -670,6 +806,11 @@ def main() -> int:
         message = f"Partial results detected ({reason_text}). Failing the action."
         print(message, file=sys.stderr)
         append_step_summary(f"- Error: {message}\n")
+        return 1
+
+    if gate_status == "failed":
+        # Every output is written above; the gate fails the step, not the report.
+        print("Quality gate failed: " + "; ".join(gate_reasons), file=sys.stderr)
         return 1
 
     return 0

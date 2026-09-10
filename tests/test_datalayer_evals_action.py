@@ -31,6 +31,7 @@ def action_module(monkeypatch):
         "type_counts": {},
         "failures": [],
     }
+    evals_pkg.benchmark_url = lambda evalset_id: f"https://datalayer.app/benchmarks/{evalset_id}"
     evals_pkg.execute_evalset_spec = lambda *_args, **_kwargs: {
         "evalset_id": "evalset-executed",
         "evalset_name": "spec-sdk",
@@ -266,6 +267,8 @@ def _manifest_outputs() -> list[str]:
 
 
 ACTION_OUTPUTS = [
+    "live_report_url",
+    "gate_status",
     "prepared_spec_path",
     "spec_path",
     "report_file",
@@ -319,6 +322,10 @@ def test_run_report_writes_its_outputs(action_module, monkeypatch, tmp_path):
     assert set(written) == set(ACTION_OUTPUTS) - {"prepared_spec_path", "spec_path"}
     assert written["evalset_id"] == "evalset-1"
     assert written["failed_run_count"] == "0"
+    assert written["live_report_url"] == "https://datalayer.app/benchmarks/evalset-1"
+    assert written["gate_status"] == "skipped"  # no gate asked for
+    # The first thing the summary says is where to read it (B6-01).
+    assert summary.read_text(encoding="utf-8").splitlines()[2].startswith("**Live report:** https://datalayer.app/benchmarks/evalset-1")
     assert Path(written["report_file"]).read_text(encoding="utf-8").strip() == "# report"
     assert "Datalayer Evals Report" in summary.read_text(encoding="utf-8")
 
@@ -367,10 +374,162 @@ def test_execute_runs_names_the_local_agent_the_way_the_runner_does(action_modul
         account_uid="",
         request_timeout_seconds=180,
     )
-    assert executed == "evalset-executed"
+    assert executed["evalset_id"] == "evalset-executed"
     assert captured["agent_name"] == "my-agent"
     assert "local_agent_name" not in captured
     # Unset inputs are left to the runner's defaults rather than sent as None.
     assert "billing_entity_uid" not in captured
     assert captured["run_limit"] == 3
     assert captured["execution_target"] == "local"
+
+
+def test_execute_runs_hands_the_concurrency_and_the_budget_to_the_launch(action_module, monkeypatch):
+    """A cloud execution is a launch (B2-15): the runner gets the pool size
+    and the credits cap the workflow inputs name."""
+    seen = {}
+
+    def fake_execute(_client, **kwargs):
+        seen.update(kwargs)
+        return {"evalset_id": "evalset-1"}
+
+    monkeypatch.setattr(action_module, "execute_evalset_spec", fake_execute)
+    monkeypatch.setattr(action_module, "make_client", lambda **kwargs: object())
+    monkeypatch.setattr(action_module, "load_evalset_spec", lambda path: {"name": "x", "cases": [{"name": "c"}]})
+    monkeypatch.setenv("INPUT_MODE", "execute-runs")
+    monkeypatch.setenv("INPUT_API_KEY", "key")
+    monkeypatch.setenv("INPUT_EVALSET_SPEC_FILE", "spec.json")
+    monkeypatch.setenv("INPUT_AGENT_SPEC_IDS", "jupyter-data-analyst")
+    monkeypatch.setenv("INPUT_CONCURRENCY", "8")
+    monkeypatch.setenv("INPUT_BUDGET", "12.5")
+    assert action_module.main() == 0
+    assert seen["concurrency"] == 8 and seen["credits_limit"] == 12.5 and seen["execution_target"] == "cloud"
+    monkeypatch.setenv("INPUT_BUDGET", "lots")
+    assert action_module.main() == 2
+
+
+def _run_report(action_module, monkeypatch, tmp_path, report, **env):
+    """One run-report pass: its exit code, the outputs it wrote, its summary."""
+    outputs = tmp_path / "outputs.txt"
+    summary = tmp_path / "summary.md"
+    for path in (outputs, summary):
+        if path.exists():
+            path.unlink()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GITHUB_OUTPUT", str(outputs))
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setenv("INPUT_MODE", "run-report")
+    monkeypatch.setenv("INPUT_API_KEY", "key")
+    monkeypatch.setenv("INPUT_EVALSET_ID", "evalset-1")
+    for key in ("INPUT_PASS_RATE_THRESHOLD", "INPUT_MAX_REGRESSION"):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(action_module, "build_eval_report", lambda *a, **k: report)
+    code = action_module.main()
+    written = dict(line.split("=", 1) for line in outputs.read_text(encoding="utf-8").splitlines())
+    return code, written, summary.read_text(encoding="utf-8")
+
+
+def _scored_report(latest: float, drift: float) -> dict:
+    return {
+        "generated_at": "2026-01-01T00:00:00Z",
+        "evalset_id": "evalset-1",
+        "experiments": [
+            {
+                "id": "experiment-1",
+                "name": "candidate",
+                "latest_pass_rate": latest,
+                "baseline_pass_rate": latest - drift,
+                "drift_delta": drift,
+                "runs": [{"id": "run-1", "status": "completed"}],
+            }
+        ],
+    }
+
+
+def test_the_quality_gate_is_computed_from_the_scores(action_module, monkeypatch, tmp_path):
+    """B6-05: a fixture below the threshold yields `failed`, fails the step,
+    and changes no other output; above it, `passed`; no gate, `skipped`."""
+    without = _run_report(action_module, monkeypatch, tmp_path, _scored_report(0.7, -0.1))
+    assert without[0] == 0 and without[1]["gate_status"] == "skipped"
+
+    below = _run_report(action_module, monkeypatch, tmp_path, _scored_report(0.7, -0.1), INPUT_PASS_RATE_THRESHOLD="0.8")
+    assert below[0] == 1 and below[1]["gate_status"] == "failed"
+    assert {k: v for k, v in below[1].items() if k != "gate_status"} == {
+        k: v for k, v in without[1].items() if k != "gate_status"
+    }
+    assert "Quality gate: **failed**" in below[2] and "70.0% is below the threshold 80.0%" in below[2]
+
+    above = _run_report(action_module, monkeypatch, tmp_path, _scored_report(0.9, -0.01), INPUT_PASS_RATE_THRESHOLD="0.8", INPUT_MAX_REGRESSION="0.05")
+    assert above[0] == 0 and above[1]["gate_status"] == "passed"
+
+    regressed = _run_report(action_module, monkeypatch, tmp_path, _scored_report(0.9, -0.1), INPUT_MAX_REGRESSION="0.05")
+    assert regressed[0] == 1 and regressed[1]["gate_status"] == "failed"
+    assert "exceeds the allowed regression" in regressed[2]
+
+    # A score that is not there is not a pass.
+    unscored = _run_report(action_module, monkeypatch, tmp_path, _one_experiment_report(), INPUT_PASS_RATE_THRESHOLD="0.5")
+    assert unscored[0] == 1 and "no scored run" in unscored[2]
+
+    # A gate that is not a fraction is refused before anything runs.
+    monkeypatch.setenv("INPUT_PASS_RATE_THRESHOLD", "80")
+    assert action_module.main() == 2
+
+
+def test_the_git_context_is_read_from_what_actions_sets(action_module, tmp_path):
+    event = tmp_path / "event.json"
+    event.write_text(json.dumps({"pull_request": {"number": 12}}), encoding="utf-8")
+    context = action_module.git_context(
+        {
+            "GITHUB_SHA": "0123456789abcdef",
+            "GITHUB_REF": "refs/pull/12/merge",
+            "GITHUB_REPOSITORY": "datalayer/data-analysis",
+            "GITHUB_RUN_ID": "42",
+            "GITHUB_EVENT_PATH": str(event),
+        }
+    )
+    assert context == {
+        "sha": "0123456789abcdef",
+        "ref": "refs/pull/12/merge",
+        "repository": "datalayer/data-analysis",
+        "run_id": "42",
+        "pr_number": "12",
+        "url": "https://github.com/datalayer/data-analysis/actions/runs/42",
+    }
+    # No event payload: the pull request comes from the ref, when it is one.
+    assert action_module.git_context({"GITHUB_REF": "refs/pull/7/head"})["pr_number"] == "7"
+    assert action_module.git_context({"GITHUB_REF": "refs/heads/main"})["pr_number"] == ""
+    # Outside Actions everything is empty, and the runner drops empty values.
+    assert all(value == "" for value in action_module.git_context({}).values())
+
+
+def test_execute_runs_hands_the_git_context_and_names_the_live_report(action_module, monkeypatch, tmp_path):
+    seen = {}
+
+    def fake_execute(_client, **kwargs):
+        seen.update(kwargs)
+        return {"evalset_id": "evalset-1", "launch_ids": ["launch-9"], "view_url": "https://datalayer.app/runs/launch-9"}
+
+    outputs = tmp_path / "outputs.txt"
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(outputs))
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setenv("GITHUB_SHA", "abc")
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "datalayer/x")
+    monkeypatch.setenv("GITHUB_RUN_ID", "7")
+    monkeypatch.delenv("GITHUB_EVENT_PATH", raising=False)
+    monkeypatch.setattr(action_module, "execute_evalset_spec", fake_execute)
+    monkeypatch.setattr(action_module, "make_client", lambda **kwargs: object())
+    monkeypatch.setattr(action_module, "load_evalset_spec", lambda path: {"name": "x", "cases": [{"name": "c"}]})
+    monkeypatch.setenv("INPUT_MODE", "execute-runs")
+    monkeypatch.setenv("INPUT_API_KEY", "key")
+    monkeypatch.setenv("INPUT_EVALSET_SPEC_FILE", "spec.json")
+    monkeypatch.setenv("INPUT_AGENT_SPEC_IDS", "jupyter-data-analyst")
+    assert action_module.main() == 0
+    assert seen["git"]["sha"] == "abc" and seen["git"]["repository"] == "datalayer/x" and seen["git"]["run_id"] == "7"
+    written = dict(line.split("=", 1) for line in outputs.read_text(encoding="utf-8").splitlines())
+    assert written["live_report_url"] == "https://datalayer.app/runs/launch-9"
+    text = summary.read_text(encoding="utf-8")
+    assert text.splitlines()[2] == "**Live report:** https://datalayer.app/runs/launch-9"
+    assert "- Launches: launch-9" in text

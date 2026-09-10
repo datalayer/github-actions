@@ -22,7 +22,12 @@ It supports two execution modes:
 - Comparison mode (primary + secondary evalsets) with a generated summary markdown.
 
 Real run execution is runner-first and uses `agent_runtimes.evals.remote.execute_evalset_spec`
-with one runtime per agentspec id in `mode=execute-runs`.
+in `mode=execute-runs`. With `execution-target: cloud` (the default) the runner submits one
+**launch** per run — one experiment per agentspec id — that the Datalayer platform executes on
+a pool of sandboxes as the account, grades and keeps the evidence of, and the action follows the
+launch to its end; it is the same `agent-runtimes evals run` path the CLI takes. With
+`execution-target: local` the tasks run on the job's machine through a local `agent-runtimes`
+server and the runs are recorded on the platform.
 
 Evalsets can be provided as IDs, or created on the fly from spec files.
 
@@ -130,15 +135,25 @@ the action does not force a billing override.
 - runtimes-url: optional, Runtimes URL override used by mode=execute-runs
 - agentspec-ids: optional, comma-separated list of spec ids for mode=execute-runs
 - agent-environment-name: optional, default ai-agents-env; used by mode=execute-runs
+- concurrency: optional, default 4; sandboxes a cloud launch runs the tasks on, per experiment
+- budget: optional, empty by default; credits a cloud launch may spend, it ends `blocked` when reached
 - execution-target: optional, default cloud; one of cloud or local for mode=execute-runs
 - auto-start-local-agent-runtime: optional, default false; when local, auto-start a local agent-runtimes server if none is reachable
 - local-agent-base-url: optional, default http://127.0.0.1:8765; local runtime base URL when execution-target=local
 - local-agent-name: optional, default default; local agent id when execution-target=local
+- pass-rate-threshold: optional, empty by default; a quality gate for mode=run-report — every experiment's latest pass rate must be at least this fraction (`0.8` is 80%). An experiment with no scored run does not pass a gate
+- max-regression: optional, empty by default; a quality gate for mode=run-report — no experiment's drift (latest minus baseline pass rate) may fall below minus this fraction (`0.05` is five points)
+
+Both gates are computed from the scores in the report, never from its text. A failed gate fails the step after every output is written, so the report and its files are still there to read.
+
+In mode=execute-runs the action also puts where the launch came from on the launch — the commit (`GITHUB_SHA`), the ref, the repository, the action run id and the pull request number when there is one — as the launch's `config.git`. Datalayer indexes it, shows it on the launch's page, and names it in the report's methodology, so a result can always be traced back to the change that produced it.
 
 At least one of evalset-id or evalset-spec-file must be provided.
 
 ### Outputs
 
+- live-report-url: where to read the result in Datalayer — the launch's page after execute-runs, the benchmark's page after run-report. It is also the first line of the step summary
+- gate-status: `passed`, `failed`, or `skipped` when no gate was set (mode=run-report)
 - report-file: markdown report file path
 - csv-file: CSV report file path (empty when export-csv=false)
 - log-file: full structured report JSON log file path (captures all failure causes)
