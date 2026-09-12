@@ -19,7 +19,8 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
+from urllib.parse import quote
 
 from agent_runtimes.client import AgentClient
 from agent_runtimes.evals.remote import (
@@ -35,6 +36,27 @@ from agent_runtimes.evals.remote import (
     timestamp_slug,
     write_eval_report_csv,
 )
+
+
+def _comparison_url(evalset_id: str, launch_ids: Sequence[str] = ()) -> str:
+    """The cross-agentspec comparison of a benchmark (B6-03, B5-08).
+
+    Composed from `benchmark_url` rather than built from a base of its own:
+    where the product lives is `agent_runtimes.evals.links`' business, and two
+    answers to that question is how a link starts pointing at the wrong
+    deployment.
+
+    The launches are named when they are known — an execution knows the ones it
+    just submitted — and left off otherwise, in which case the page compares the
+    two newest launches of the benchmark.
+    """
+    page = benchmark_url(evalset_id)
+    if not page:
+        return ""
+    named = [str(item).strip() for item in launch_ids if str(item or "").strip()]
+    if not named:
+        return f"{page}/compare"
+    return f"{page}/compare?launches={quote(','.join(named), safe=',')}"
 
 
 def as_bool(raw: str) -> bool:
@@ -280,6 +302,8 @@ def _write_comparison_summary(
     secondary_label: str,
     primary_report: dict[str, Any],
     secondary_report: dict[str, Any],
+    primary_comparison_url: str = "",
+    secondary_comparison_url: str = "",
 ) -> None:
     primary_avg = average_latest_pass_rate(primary_report)
     secondary_avg = average_latest_pass_rate(secondary_report)
@@ -306,6 +330,15 @@ def _write_comparison_summary(
         delta = secondary_avg - primary_avg
         lines.append(f"| Delta (Secondary - Primary) | {delta * 100:+.1f} pts | |")
     lines.append("")
+    # Where to read each side in the product (B6-03): the file a reviewer is
+    # handed should not make them go and find the pages themselves.
+    if primary_comparison_url or secondary_comparison_url:
+        lines.append("Compare in Datalayer:")
+        if primary_comparison_url:
+            lines.append(f"- Primary: {primary_comparison_url}")
+        if secondary_comparison_url:
+            lines.append(f"- Secondary: {secondary_comparison_url}")
+        lines.append("")
     lines.append("Notes:")
     lines.append("- Use the same eval cases in both specs.")
     lines.append("- Keep only one controlled variable between primary and secondary.")
@@ -490,10 +523,24 @@ def _run_execute_runs_mode() -> int:
     append_github_output("executed_evalset_id", executed_evalset_id)
     append_github_output("evalset_id", executed_evalset_id)
     append_github_output("live_report_url", live_report_url)
+    # Where several agentspecs are compared against each other (B6-03): the
+    # launches this execution submitted, named, so the link is this run's
+    # comparison rather than whatever is newest by the time somebody opens it.
+    launch_ids = [str(item) for item in (execution.get("launch_ids") or []) if str(item or "").strip()]
+    experiments = [str(item) for item in (execution.get("experiment_ids") or []) if str(item or "").strip()]
+    comparison_url = (
+        _comparison_url(executed_evalset_id, launch_ids)
+        if len(agent_spec_ids) > 1 or len(experiments) > 1 or len(launch_ids) > 1
+        else ""
+    )
+    append_github_output("comparison_url", comparison_url)
+    append_github_output("secondary_comparison_url", "")
 
     append_step_summary("## Datalayer Evals Report\n\n")
     # The first line is where to read it (B6-01).
     append_step_summary(f"**Live report:** {live_report_url}\n\n")
+    if comparison_url:
+        append_step_summary(f"**Comparison:** {comparison_url}\n\n")
     append_step_summary("- Mode: execute-runs\n")
     append_step_summary(f"- Lane: {run_environment}\n")
     append_step_summary(f"- Execution target: {execution_target}\n")
@@ -681,6 +728,16 @@ def main() -> int:
         append_step_summary(f"- Error: `{message}`\n")
         return 1
 
+    # A benchmark with more than one experiment has a cross-agentspec
+    # comparison to read (B6-03). No launches are named: this mode reports on
+    # runs that already exist, so the page compares the two newest launches.
+    comparison_url = (
+        _comparison_url(resolved_evalset_id)
+        if len((primary_report or {}).get("experiments") or []) > 1
+        else ""
+    )
+    secondary_comparison_url = ""
+
     secondary_outputs = {
         "report_file": "",
         "csv_file": "",
@@ -714,6 +771,12 @@ def main() -> int:
             append_step_summary(f"- Error: `{message}`\n")
             return 1
 
+        secondary_comparison_url = (
+            _comparison_url(resolved_secondary_evalset_id)
+            if len((secondary_report or {}).get("experiments") or []) > 1
+            else ""
+        )
+
         summary_path = (
             Path(comparison_summary_output)
             if comparison_summary_output
@@ -725,6 +788,8 @@ def main() -> int:
             secondary_label=resolved_secondary_evalset_id,
             primary_report=primary_report,
             secondary_report=secondary_report,
+            primary_comparison_url=comparison_url,
+            secondary_comparison_url=secondary_comparison_url,
         )
         comparison_summary_file = str(summary_path)
 
@@ -742,6 +807,8 @@ def main() -> int:
     )
 
     append_github_output("live_report_url", live_report_url)
+    append_github_output("comparison_url", comparison_url)
+    append_github_output("secondary_comparison_url", secondary_comparison_url)
     append_github_output("gate_status", gate_status)
     append_github_output("report_file", primary_outputs["report_file"])
     append_github_output("csv_file", primary_outputs["csv_file"])
@@ -763,6 +830,9 @@ def main() -> int:
     if primary_outputs["report_file"]:
         append_step_summary("## Datalayer Evals Report\n\n")
         append_step_summary(f"**Live report:** {live_report_url}\n\n")
+        if comparison_url:
+            # Where several subjects are read against each other (B6-03).
+            append_step_summary(f"**Comparison:** {comparison_url}\n\n")
         if gate_status != "skipped":
             append_step_summary(f"- Quality gate: **{gate_status}**\n")
             for reason in gate_reasons:

@@ -165,6 +165,17 @@ outputs:
       execute-runs, the benchmark's page after run-report. Also the first line
       of the step summary.
     value: ${{ steps.run.outputs.live_report_url }}
+  comparison-url:
+    description: >-
+      The cross-agentspec comparison of the benchmark (B6-03): the launches this
+      execution submitted after execute-runs, and the benchmark's two newest
+      launches after run-report. Empty where only one subject ran, since there
+      is nothing to compare.
+    value: ${{ steps.run.outputs.comparison_url }}
+  secondary-comparison-url:
+    description: >-
+      The same for the secondary benchmark of two-spec mode; empty otherwise.
+    value: ${{ steps.run.outputs.secondary_comparison_url }}
   gate-status:
     description: >-
       The quality gates' verdict (run-report): passed, failed, or skipped when

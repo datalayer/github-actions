@@ -268,6 +268,8 @@ def _manifest_outputs() -> list[str]:
 
 ACTION_OUTPUTS = [
     "live_report_url",
+    "comparison_url",
+    "secondary_comparison_url",
     "gate_status",
     "prepared_spec_path",
     "spec_path",
@@ -533,3 +535,111 @@ def test_execute_runs_hands_the_git_context_and_names_the_live_report(action_mod
     text = summary.read_text(encoding="utf-8")
     assert text.splitlines()[2] == "**Live report:** https://datalayer.app/runs/launch-9"
     assert "- Launches: launch-9" in text
+
+
+def _two_experiment_report() -> dict:
+    """A benchmark two agentspecs ran: what B6-03's link is for."""
+    return {
+        "generated_at": "2026-01-01T00:00:00Z",
+        "evalset_id": "evalset-1",
+        "experiments": [
+            {"id": "experiment-1", "runs": [{"id": "run-1", "status": "completed"}]},
+            {"id": "experiment-2", "runs": [{"id": "run-2", "status": "completed"}]},
+        ],
+    }
+
+
+def test_run_report_links_the_comparison_when_more_than_one_subject_ran(
+    action_module, monkeypatch, tmp_path
+):
+    """B6-03: one evalset with several agentspec experiments links to the
+    cross-agentspec comparison."""
+    monkeypatch.chdir(tmp_path)
+    outputs = tmp_path / "outputs.txt"
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(outputs))
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setenv("INPUT_MODE", "run-report")
+    monkeypatch.setenv("INPUT_API_KEY", "key")
+    monkeypatch.setenv("INPUT_EVALSET_ID", "evalset-1")
+    monkeypatch.setenv("INPUT_RUN_LIMIT", "1")
+    monkeypatch.setattr(action_module, "build_eval_report", lambda *a, **k: _two_experiment_report())
+
+    assert action_module.main() == 0
+
+    written = dict(line.split("=", 1) for line in outputs.read_text(encoding="utf-8").splitlines())
+    assert written["comparison_url"] == "https://datalayer.app/benchmarks/evalset-1/compare"
+    assert written["secondary_comparison_url"] == ""
+    assert "**Comparison:** https://datalayer.app/benchmarks/evalset-1/compare" in summary.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_one_subject_has_nothing_to_compare(action_module, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    outputs = tmp_path / "outputs.txt"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(outputs))
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(tmp_path / "summary.md"))
+    monkeypatch.setenv("INPUT_MODE", "run-report")
+    monkeypatch.setenv("INPUT_API_KEY", "key")
+    monkeypatch.setenv("INPUT_EVALSET_ID", "evalset-1")
+    monkeypatch.setenv("INPUT_RUN_LIMIT", "1")
+    monkeypatch.setattr(action_module, "build_eval_report", lambda *a, **k: _one_experiment_report())
+
+    assert action_module.main() == 0
+
+    written = dict(line.split("=", 1) for line in outputs.read_text(encoding="utf-8").splitlines())
+    assert written["comparison_url"] == "", "one subject is a result, not a comparison"
+
+
+def test_execute_runs_links_the_launches_it_submitted(action_module, monkeypatch, tmp_path):
+    """B6-03: the link names this execution's launches, not whatever is newest
+    by the time somebody opens it."""
+    monkeypatch.chdir(tmp_path)
+    outputs = tmp_path / "outputs.txt"
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(outputs))
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setenv("INPUT_MODE", "execute-runs")
+    monkeypatch.setenv("INPUT_API_KEY", "key")
+    monkeypatch.setenv("INPUT_EVALSET_SPEC_FILE", "spec.json")
+    monkeypatch.setenv("INPUT_AGENT_SPEC_IDS", "agent-a,agent-b")
+    monkeypatch.setenv("INPUT_EXECUTION_TARGET", "cloud")
+    monkeypatch.setattr(action_module, "make_client", lambda **kwargs: object())
+    monkeypatch.setattr(
+        action_module,
+        "_execute_eval_runs",
+        lambda **kwargs: {
+            "evalset_id": "evalset-9",
+            "experiment_ids": ["experiment-a", "experiment-b"],
+            "launch_ids": ["launch-1", "launch-2"],
+        },
+    )
+
+    assert action_module.main() == 0
+
+    written = dict(line.split("=", 1) for line in outputs.read_text(encoding="utf-8").splitlines())
+    assert (
+        written["comparison_url"]
+        == "https://datalayer.app/benchmarks/evalset-9/compare?launches=launch-1,launch-2"
+    )
+    assert "**Comparison:**" in summary.read_text(encoding="utf-8")
+
+
+def test_the_comparison_summary_says_where_to_read_each_side(action_module, tmp_path):
+    path = tmp_path / "comparison.md"
+
+    action_module._write_comparison_summary(
+        path=path,
+        primary_label="evalset-1",
+        secondary_label="evalset-2",
+        primary_report=_two_experiment_report(),
+        secondary_report=_two_experiment_report(),
+        primary_comparison_url="https://datalayer.app/benchmarks/evalset-1/compare",
+        secondary_comparison_url="https://datalayer.app/benchmarks/evalset-2/compare",
+    )
+
+    written = path.read_text(encoding="utf-8")
+    assert "Compare in Datalayer:" in written
+    assert "- Primary: https://datalayer.app/benchmarks/evalset-1/compare" in written
+    assert "- Secondary: https://datalayer.app/benchmarks/evalset-2/compare" in written
