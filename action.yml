@@ -8,11 +8,33 @@ branding:
 
 inputs:
   mode:
-    description: "Action mode: run-report, execute-runs, or prepare-spec."
+    description: "Action mode: run-report, execute-runs, prepare-spec, or post-decision."
     required: false
     default: "run-report"
   evalset-id:
     description: Primary evalset ID to report.
+    required: false
+    default: ""
+  launch-id:
+    description: >-
+      A launch, for mode=post-decision: what was decided about that run rather
+      than about the whole benchmark.
+    required: false
+    default: ""
+  github-token:
+    description: >-
+      Token for mode=post-decision, to leave the decision summary on the pull
+      request. Without it the summary is still an output and nothing is posted.
+    required: false
+    default: ""
+  repository:
+    description: "owner/repo for mode=post-decision; GITHUB_REPOSITORY by default."
+    required: false
+    default: ""
+  pr-number:
+    description: >-
+      The pull request to comment on for mode=post-decision; read from the event
+      by default.
     required: false
     default: ""
   evalset-spec-file:
@@ -176,6 +198,20 @@ outputs:
     description: >-
       The same for the secondary benchmark of two-spec mode; empty otherwise.
     value: ${{ steps.run.outputs.secondary_comparison_url }}
+  decision-comment:
+    description: >-
+      The decision summary written for the pull request (mode=post-decision):
+      what a reviewer decided and where to read the report, and nothing else.
+      Empty where nothing has been decided.
+    value: ${{ steps.run.outputs.decision_comment }}
+  decision-count:
+    description: How many decisions were found (mode=post-decision).
+    value: ${{ steps.run.outputs.decision_count }}
+  decision-posted:
+    description: >-
+      `posted` or `updated` where the comment reached the pull request, empty
+      otherwise — including where there was nothing to say.
+    value: ${{ steps.run.outputs.decision_posted }}
   gate-status:
     description: >-
       The quality gates' verdict (run-report): passed, failed, or skipped when

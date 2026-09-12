@@ -270,6 +270,9 @@ ACTION_OUTPUTS = [
     "live_report_url",
     "comparison_url",
     "secondary_comparison_url",
+    "decision_comment",
+    "decision_count",
+    "decision_posted",
     "gate_status",
     "prepared_spec_path",
     "spec_path",
@@ -321,7 +324,14 @@ def test_run_report_writes_its_outputs(action_module, monkeypatch, tmp_path):
 
     written = dict(line.split("=", 1) for line in outputs.read_text(encoding="utf-8").splitlines())
     # Every run-report output, and nothing the other modes own.
-    assert set(written) == set(ACTION_OUTPUTS) - {"prepared_spec_path", "spec_path"}
+    assert set(written) == set(ACTION_OUTPUTS) - {
+        "prepared_spec_path",
+        "spec_path",
+        # post-decision's, which run-report has nothing to say about.
+        "decision_comment",
+        "decision_count",
+        "decision_posted",
+    }
     assert written["evalset_id"] == "evalset-1"
     assert written["failed_run_count"] == "0"
     assert written["live_report_url"] == "https://datalayer.app/benchmarks/evalset-1"
@@ -643,3 +653,142 @@ def test_the_comparison_summary_says_where_to_read_each_side(action_module, tmp_
     assert "Compare in Datalayer:" in written
     assert "- Primary: https://datalayer.app/benchmarks/evalset-1/compare" in written
     assert "- Secondary: https://datalayer.app/benchmarks/evalset-2/compare" in written
+
+
+DECIDED = [
+    {
+        "outcome": "accepted_regression",
+        "kind": "evaluator_issue",
+        "note": "The joins task is a known flake.",
+        "decided_at": "2026-09-12T10:00:00Z",
+    },
+    {"outcome": "rejected", "kind": "data_issue", "note": "", "decided_at": "2026-09-12T11:00:00Z"},
+]
+
+
+def test_the_decision_comment_says_what_was_decided_and_where_to_read_it(action_module):
+    """B6-04: the decision and the link, and nothing else — a pull request is a
+    public place in most repositories, and the numbers are behind an account."""
+    body = action_module.decision_comment(
+        decisions=DECIDED,
+        report_url="https://datalayer.app/benchmarks/evalset-1/report",
+        benchmark="evalset-1",
+    )
+
+    assert body == "\n".join(
+        [
+            "## Datalayer benchmark review",
+            "",
+            "**evalset-1**",
+            "",
+            "- **accepted regression** — evaluator issue: The joins task is a known flake. _(2026-09-12)_",
+            "- **rejected** — data issue _(2026-09-12)_",
+            "",
+            "[Read the report](https://datalayer.app/benchmarks/evalset-1/report)",
+            "",
+            "<!-- datalayer-evals-decision -->",
+        ]
+    )
+    assert "pass rate" not in body and "%" not in body, "the scores stay in the report"
+
+
+def test_nothing_decided_is_nothing_to_say(action_module):
+    assert action_module.decision_comment(decisions=[], report_url="https://x/report") == ""
+
+
+def test_post_decision_leaves_the_comment_and_updates_it_next_time(action_module, monkeypatch, tmp_path):
+    import httpx
+
+    posted: list[tuple[str, str, dict]] = []
+    existing: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "evals/decisions" in str(request.url):
+            return httpx.Response(200, json={"success": True, "total": 2, "decisions": DECIDED})
+        if request.method == "GET":
+            return httpx.Response(200, json=existing)
+        body = json.loads(request.content)
+        posted.append((request.method, str(request.url), dict(request.headers)))
+        return httpx.Response(201, json={"id": 42, "body": body["body"]})
+
+    transport = httpx.MockTransport(handler)
+    real_client = httpx.Client
+
+    class PatchedClient(real_client):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "Client", PatchedClient)
+    monkeypatch.chdir(tmp_path)
+    outputs = tmp_path / "outputs.txt"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(outputs))
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(tmp_path / "summary.md"))
+    monkeypatch.setenv("INPUT_MODE", "post-decision")
+    monkeypatch.setenv("INPUT_API_KEY", "key")
+    monkeypatch.setenv("INPUT_AI_AGENTS_URL", "https://agents.example")
+    monkeypatch.setenv("INPUT_EVALSET_ID", "evalset-1")
+    monkeypatch.setenv("INPUT_GITHUB_TOKEN", "gh-token")
+    monkeypatch.setenv("INPUT_REPOSITORY", "datalayer/osp")
+    monkeypatch.setenv("INPUT_PR_NUMBER", "7")
+
+    assert action_module.main() == 0
+
+    written = dict(line.split("=", 1) for line in outputs.read_text(encoding="utf-8").splitlines() if "=" in line)
+    assert written["decision_count"] == "2"
+    assert written["decision_posted"] == "posted"
+    method, url, headers = posted[-1]
+    assert method == "POST"
+    assert url == "https://api.github.com/repos/datalayer/osp/issues/7/comments"
+    assert headers["authorization"] == "Bearer gh-token"
+
+    # A second run finds its own comment and updates it, so a pull request ends
+    # with one decision comment that is current rather than a row of them.
+    existing.append({"id": 42, "body": f"old {action_module.DECISION_MARKER}"})
+    posted.clear()
+    assert action_module.main() == 0
+    method, url, _ = posted[-1]
+    assert method == "PATCH"
+    assert url == "https://api.github.com/repos/datalayer/osp/issues/comments/42"
+
+
+def test_post_decision_without_a_token_still_hands_over_the_comment(action_module, monkeypatch, tmp_path):
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "evals/decisions" in str(request.url), "nothing but the decisions is asked for"
+        return httpx.Response(200, json={"success": True, "decisions": DECIDED})
+
+    transport = httpx.MockTransport(handler)
+    real_client = httpx.Client
+
+    class PatchedClient(real_client):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "Client", PatchedClient)
+    monkeypatch.chdir(tmp_path)
+    outputs = tmp_path / "outputs.txt"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(outputs))
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(tmp_path / "summary.md"))
+    monkeypatch.setenv("INPUT_MODE", "post-decision")
+    monkeypatch.setenv("INPUT_API_KEY", "key")
+    monkeypatch.setenv("INPUT_AI_AGENTS_URL", "https://agents.example")
+    monkeypatch.setenv("INPUT_EVALSET_ID", "evalset-1")
+    monkeypatch.delenv("INPUT_GITHUB_TOKEN", raising=False)
+
+    assert action_module.main() == 0
+
+    written = dict(line.split("=", 1) for line in outputs.read_text(encoding="utf-8").splitlines() if "=" in line)
+    assert written["decision_posted"] == ""
+    assert "Datalayer benchmark review" in written["decision_comment"]
+
+
+def test_post_decision_needs_something_to_ask_about(action_module, monkeypatch):
+    monkeypatch.setenv("INPUT_MODE", "post-decision")
+    monkeypatch.setenv("INPUT_API_KEY", "key")
+    monkeypatch.delenv("INPUT_EVALSET_ID", raising=False)
+    monkeypatch.delenv("INPUT_LAUNCH_ID", raising=False)
+
+    assert action_module.main() == 2

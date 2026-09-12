@@ -59,6 +59,62 @@ def _comparison_url(evalset_id: str, launch_ids: Sequence[str] = ()) -> str:
     return f"{page}/compare?launches={quote(','.join(named), safe=',')}"
 
 
+#: What marks this action's own comment on a pull request, so a later run
+#: updates it instead of adding a second one.
+DECISION_MARKER = "<!-- datalayer-evals-decision -->"
+
+
+def _decision_line(decision: Mapping[str, Any]) -> str:
+    """One decision, as a reviewer would say it.
+
+    The outcome first, because that is what a pull request is waiting on; then
+    what kind of thing it was and the reason, which is the part a person wrote.
+    """
+    outcome = str(decision.get("outcome") or "").strip() or "decided"
+    kind = str(decision.get("kind") or "").strip().replace("_", " ")
+    note = str(decision.get("note") or "").strip()
+    when = str(decision.get("decided_at") or "").strip()[:10]
+    said = f"**{outcome.replace('_', ' ')}**"
+    if kind:
+        said += f" — {kind}"
+    if note:
+        said += f": {note}"
+    if when:
+        said += f" _({when})_"
+    return f"- {said}"
+
+
+def decision_comment(
+    *,
+    decisions: Sequence[Mapping[str, Any]],
+    report_url: str,
+    benchmark: str = "",
+) -> str:
+    """What the action posts back to the pull request (B6-04).
+
+    The decisions and where to read the result, and nothing else. Not the pass
+    rates, not the failed tasks, not the outputs: those are in the report, which
+    is behind an account, and a pull request is a public place in most
+    repositories. A reviewer decided something; the pull request is told what
+    they decided and where they decided it.
+
+    Empty where nothing has been decided: a comment saying nothing is noise on
+    somebody's pull request.
+    """
+    rows = [row for row in decisions if isinstance(row, Mapping)]
+    if not rows:
+        return ""
+    lines = ["## Datalayer benchmark review", ""]
+    if benchmark:
+        lines.append(f"**{benchmark}**")
+        lines.append("")
+    lines.extend(_decision_line(row) for row in rows)
+    if report_url:
+        lines.extend(["", f"[Read the report]({report_url})"])
+    lines.extend(["", DECISION_MARKER])
+    return "\n".join(lines)
+
+
 def as_bool(raw: str) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
@@ -628,6 +684,139 @@ def _execute_eval_runs(
     return dict(execution)
 
 
+def _decisions_about(*, ai_agents_url: str, api_key: str, evalset_id: str, launch_id: str) -> list[dict[str, Any]]:
+    """What was decided about the benchmark this workflow ran (B6-04).
+
+    Asked of the service directly rather than through the runner: CI knows the
+    benchmark it ran and nothing else — not the report a reviewer opened, let
+    alone the investigation they wrote — and `/evals/decisions` is the route
+    that takes exactly that.
+    """
+    import httpx  # noqa: PLC0415
+
+    base = str(ai_agents_url or "").strip().rstrip("/")
+    if not base:
+        raise ValueError("post-decision needs ai-agents-url")
+    query = {"limit": "50"}
+    if evalset_id:
+        query["evalset_id"] = evalset_id
+    if launch_id:
+        query["launch_id"] = launch_id
+    with httpx.Client(timeout=30.0) as client:
+        response = client.get(
+            f"{base}/api/ai-agents/v1/evals/decisions",
+            params=query,
+            headers={"Authorization": f"Bearer {api_key}", "X-API-Key": api_key},
+        )
+    if response.status_code >= 400:
+        raise RuntimeError(f"the decisions could not be read: HTTP {response.status_code} {response.text[:200]}")
+    payload = response.json() if response.content else {}
+    rows = payload.get("decisions") if isinstance(payload, dict) else None
+    return [row for row in (rows or []) if isinstance(row, dict)]
+
+
+def _put_comment(*, token: str, repository: str, pr_number: str, body: str) -> str:
+    """Leave the comment, or update the one this action left before.
+
+    A pull request should end with one decision comment that is current, not a
+    row of them: the marker is how this action finds its own.
+    """
+    import httpx  # noqa: PLC0415
+
+    api = str(os.getenv("GITHUB_API_URL") or "https://api.github.com").rstrip("/")
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    issue = f"{api}/repos/{repository}/issues/{pr_number}/comments"
+    with httpx.Client(timeout=30.0) as client:
+        existing = client.get(issue, headers=headers, params={"per_page": 100})
+        mine = ""
+        if existing.status_code < 400:
+            for comment in existing.json() or []:
+                if isinstance(comment, dict) and DECISION_MARKER in str(comment.get("body") or ""):
+                    mine = str(comment.get("id") or "")
+                    break
+        if mine:
+            answer = client.patch(f"{api}/repos/{repository}/issues/comments/{mine}", headers=headers, json={"body": body})
+        else:
+            answer = client.post(issue, headers=headers, json={"body": body})
+    if answer.status_code >= 400:
+        raise RuntimeError(f"the comment could not be posted: HTTP {answer.status_code} {answer.text[:200]}")
+    return "updated" if mine else "posted"
+
+
+def _run_post_decision_mode() -> int:
+    """Tell the pull request what a reviewer decided (B6-04).
+
+    The round trip CI cannot see the end of: the action ran the benchmark and
+    left a link, somebody opened it, investigated and recorded a decision
+    (B4-03), and this brings that decision back to where the change is being
+    discussed.
+    """
+    api_key = os.getenv("INPUT_API_KEY", "").strip()
+    ai_agents_url = os.getenv("INPUT_AI_AGENTS_URL", "").strip()
+    evalset_id = os.getenv("INPUT_EVALSET_ID", "").strip()
+    launch_id = os.getenv("INPUT_LAUNCH_ID", "").strip()
+    token = os.getenv("INPUT_GITHUB_TOKEN", "").strip()
+    if not api_key:
+        print("post-decision requires api-key", file=sys.stderr)
+        return 2
+    if not (evalset_id or launch_id):
+        print("post-decision requires evalset-id or launch-id", file=sys.stderr)
+        return 2
+
+    context = git_context()
+    repository = os.getenv("INPUT_REPOSITORY", "").strip() or context["repository"]
+    pr_number = os.getenv("INPUT_PR_NUMBER", "").strip() or context["pr_number"]
+
+    try:
+        decisions = _decisions_about(
+            ai_agents_url=ai_agents_url, api_key=api_key, evalset_id=evalset_id, launch_id=launch_id
+        )
+    except Exception as exc:  # noqa: BLE001 - the reason belongs in the summary
+        message = f"Failed to read the decisions: {exc}"
+        print(message, file=sys.stderr)
+        append_step_summary("## Datalayer Evals Report\n\n")
+        append_step_summary(f"- Error: `{message}`\n")
+        return 1
+
+    body = decision_comment(
+        decisions=decisions,
+        # The benchmark's report tab, composed from the one module that knows
+        # where the product lives, as `_comparison_url` is.
+        report_url=f"{benchmark_url(evalset_id)}/report" if evalset_id else "",
+        benchmark=evalset_id,
+    )
+    append_github_output("decision_count", str(len(decisions)))
+    append_github_output("decision_comment", body)
+
+    append_step_summary("## Datalayer Evals Report\n\n")
+    append_step_summary("- Mode: post-decision\n")
+    if not body:
+        append_github_output("decision_posted", "")
+        append_step_summary("- Nothing has been decided yet, so nothing was posted.\n")
+        return 0
+    if not (token and repository and pr_number):
+        # The comment is still an output: a workflow that would rather post it
+        # itself has everything it needs, and nothing is posted by halves.
+        append_github_output("decision_posted", "")
+        append_step_summary("- The decision summary is in `decision-comment`; no token, repository or pull request to post it to.\n")
+        return 0
+    try:
+        what = _put_comment(token=token, repository=repository, pr_number=pr_number, body=body)
+    except Exception as exc:  # noqa: BLE001
+        message = f"Failed to post the decision: {exc}"
+        print(message, file=sys.stderr)
+        append_github_output("decision_posted", "")
+        append_step_summary(f"- Error: `{message}`\n")
+        return 1
+    append_github_output("decision_posted", what)
+    append_step_summary(f"- The decision summary was {what} on {repository}#{pr_number}.\n")
+    return 0
+
+
 def main() -> int:
     mode = os.getenv("INPUT_MODE", "run-report").strip().lower() or "run-report"
 
@@ -635,6 +824,8 @@ def main() -> int:
         return _run_prepare_spec_mode()
     if mode == "execute-runs":
         return _run_execute_runs_mode()
+    if mode == "post-decision":
+        return _run_post_decision_mode()
     if mode != "run-report":
         print(f"Unsupported mode: {mode}", file=sys.stderr)
         return 2
